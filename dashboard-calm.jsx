@@ -587,7 +587,7 @@
     const firstName = current && current.name ? current.name.split(' ')[0] : 'there';
     const show = (k) => widgets[k] !== false;
     return (
-      <window.PageShell dark={dark} activePage="dashboard">
+      <window.PageShell dark={dark} activePage="home">
         {(pal) => (
           <div style={{
             flex: 1, padding: '20px 24px',

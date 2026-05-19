@@ -15,7 +15,7 @@
 (function () {
   function parse(hash) {
     const raw = (hash || '').replace(/^#\/?/, '');
-    if (!raw) return { name: 'dashboard', segs: [] };
+    if (!raw) return { name: 'home', segs: [] };
     const segs = raw.split('/').filter(Boolean);
     if (segs[0] === 'contractors') {
       if (segs.length === 1) return { name: 'contractors', segs };
@@ -34,7 +34,7 @@
     }
     if (segs[0] === 'board')     return { name: 'board', segs };
     if (segs[0] === 'matchmaker') return { name: 'matchmaker', segs };
-    return { name: 'dashboard', segs: [] };
+    return { name: 'home', segs: [] };
   }
 
   function useRoute() {

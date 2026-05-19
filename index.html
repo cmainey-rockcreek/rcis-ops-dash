@@ -146,7 +146,7 @@
                 onChange={(v) => setTweak('dark', v === 'dark')}
               />
             </TweakSection>
-            {route.name === 'dashboard' && (
+            {route.name === 'home' && (
               <TweakSection label="Dashboard widgets">
                 <TweakToggle label="Stats / greeting"  value={t.showStats}    onChange={(v) => setTweak('showStats', v)} />
                 <TweakToggle label="Coverage gaps"     value={t.showGaps}     onChange={(v) => setTweak('showGaps', v)} />

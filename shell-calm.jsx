@@ -138,7 +138,7 @@
   function CalmSidebar({ pal, activePage }) {
     const { SPECIALTIES, DISTRICTS } = window.RCIS_DATA;
     const NAV = [
-      { key: 'dashboard',   icon: 'grid',   name: 'Overview',     to: '/' },
+      { key: 'home',        icon: 'grid',   name: 'Home',         to: '/' },
       { key: 'contractors', icon: 'user',   name: 'Contractors',  to: '/contractors', badge: window.RCIS_DATA.CONTRACTORS.length.toString() },
       { key: 'contacts',    icon: 'user',   name: 'Contacts',     to: '/contacts' },
       { key: 'districts',   icon: 'flag',   name: 'Districts',    to: '/districts',   badge: window.RCIS_DATA.DISTRICTS.length.toString() },
