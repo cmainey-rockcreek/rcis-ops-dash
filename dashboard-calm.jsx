@@ -227,7 +227,7 @@
           width: '100%', flex: 1,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: pal.text }}>Team board</h3>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: pal.text }}>Task board</h3>
             <span style={{ fontSize: 11, color: pal.textFaint }}>· {todos.length} cards · {todos.filter(t => t.column !== 'done').length} open</span>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ display: 'flex', gap: 4 }}>
@@ -250,7 +250,7 @@
                 fontSize: 12, fontWeight: 600,
                 cursor: 'pointer', fontFamily: 'inherit',
               }}>
-                <Icon name="plus" size={12} stroke={2.4} /> New todo
+                <Icon name="plus" size={12} stroke={2.4} /> New task
               </button>
             </div>
           </div>

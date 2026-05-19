@@ -10,6 +10,14 @@
     doing: { label: 'Doing', color: '#2BBFB5' },
     done: { label: 'Done', color: '#3E8A57' },
   };
+  const DEFAULT_FILTERS = {
+    q: '',
+    owner: 'all',
+    status: 'open',
+    priority: 'all',
+    label: 'all',
+    due: 'all',
+  };
 
   function TasksPage({ dark = false }) {
     return (
@@ -24,14 +32,7 @@
     const [editor, setEditor] = React.useState(null);
     const [dragId, setDragId] = React.useState(null);
     const [dragOver, setDragOver] = React.useState(null);
-    const [filters, setFilters] = React.useState({
-      q: '',
-      owner: 'all',
-      status: 'open',
-      priority: 'all',
-      label: 'all',
-      due: 'all',
-    });
+    const [filters, setFilters] = React.useState(DEFAULT_FILTERS);
 
     const filtered = React.useMemo(() => {
       return todos.filter((t) => matchesFilters(t, filters));
@@ -50,7 +51,7 @@
     }, [filtered]);
 
     const setFilter = (key, value) => setFilters((f) => ({ ...f, [key]: value }));
-    const clearFilters = () => setFilters({ q: '', owner: 'all', status: 'open', priority: 'all', label: 'all', due: 'all' });
+    const clearFilters = () => setFilters(DEFAULT_FILTERS);
 
     const openNew = (column = 'todo') => {
       setEditor({
@@ -71,13 +72,15 @@
     };
     const openEdit = (todo) => setEditor({ isNew: false, todo: { ...todo } });
     const closeEditor = () => setEditor(null);
-    const saveEditor = (patch) => {
+    const saveEditor = async (patch) => {
       if (editor.isNew) {
         const { id, ...rest } = patch;
-        window.TodosStore.add(rest);
+        setFilters(DEFAULT_FILTERS);
+        await window.TodosStore.add(rest);
       } else {
-        window.TodosStore.update(editor.todo.id, patch);
+        await window.TodosStore.update(editor.todo.id, patch);
       }
+      await window.TodosStore.reload();
       closeEditor();
     };
     const deleteEditor = () => {
