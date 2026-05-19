@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>RCIS — Internal Dashboard</title>
+  <link rel="icon" href="assets/logo.avif" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      min-height: 100vh; height: 100%;
+      background: #FBF8F3;
+      font-family: "Public Sans", system-ui, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    /* Dashboard is designed for ~1440px wide. Below that, allow horizontal scroll
+       rather than crushing the layout. */
+    #root {
+      min-height: 100vh; min-width: 1280px;
+      display: flex; flex-direction: column;
+    }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script src="data.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
+  <script src="supabase-config.js"></script>
+  <script src="supabase-client.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" src="shared.jsx"></script>
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="router.jsx"></script>
+  <script type="text/babel" src="auth-gate.jsx"></script>
+  <script src="todos-store.js"></script>
+  <script type="text/babel" src="todo-editor.jsx"></script>
+  <script src="data-contractors.js"></script>
+  <script src="data-schools.js"></script>
+  <script src="contacts-store.js"></script>
+  <script src="documents-store.js"></script>
+  <script src="notes-store.js"></script>
+  <script type="text/babel" src="shell-calm.jsx"></script>
+  <script type="text/babel" src="contacts-section.jsx"></script>
+  <script type="text/babel" src="documents-section.jsx"></script>
+  <script type="text/babel" src="notes-section.jsx"></script>
+  <script type="text/babel" src="dashboard-calm.jsx"></script>
+  <script type="text/babel" src="page-contractors.jsx"></script>
+  <script type="text/babel" src="page-schools.jsx"></script>
+  <script type="text/babel" src="page-districts.jsx"></script>
+  <script type="text/babel" src="page-contacts.jsx"></script>
+
+  <script type="text/babel">
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "dark": true,
+      "showStats": true,
+      "showGaps": true,
+      "showCapacity": true,
+      "showKanban": true,
+      "showRenewals": true,
+      "showNotes": true
+    }/*EDITMODE-END*/;
+
+    function App() {
+      const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+      const route = useRoute();
+      const widgets = {
+        stats: t.showStats,
+        gaps: t.showGaps,
+        capacity: t.showCapacity,
+        kanban: t.showKanban,
+        renewals: t.showRenewals,
+        notes: t.showNotes,
+      };
+
+      let page;
+      if (route.name === 'contractors') {
+        page = <ContractorsListPage dark={t.dark} />;
+      } else if (route.name === 'contractor') {
+        page = <ContractorDetailPage dark={t.dark} id={route.id} />;
+      } else if (route.name === 'schools') {
+        page = <SchoolsListPage dark={t.dark} />;
+      } else if (route.name === 'school') {
+        page = <SchoolDetailPage dark={t.dark} id={route.id} />;
+      } else if (route.name === 'districts') {
+        page = <DistrictsListPage dark={t.dark} />;
+      } else if (route.name === 'district') {
+        page = <DistrictDetailPage dark={t.dark} id={route.id} />;
+      } else if (route.name === 'contacts') {
+        page = <ContactsPage dark={t.dark} />;
+      } else {
+        page = <DashboardCalm dark={t.dark} widgets={widgets} />;
+      }
+
+      return (
+        <AuthGate>
+          {page}
+
+          <TweaksPanel title="Tweaks">
+            <TweakSection label="Theme">
+              <TweakRadio
+                label="Mode"
+                value={t.dark ? 'dark' : 'light'}
+                options={['light', 'dark']}
+                onChange={(v) => setTweak('dark', v === 'dark')}
+              />
+            </TweakSection>
+            {route.name === 'dashboard' && (
+              <TweakSection label="Dashboard widgets">
+                <TweakToggle label="Stats / greeting"  value={t.showStats}    onChange={(v) => setTweak('showStats', v)} />
+                <TweakToggle label="Coverage gaps"     value={t.showGaps}     onChange={(v) => setTweak('showGaps', v)} />
+                <TweakToggle label="Capacity now"      value={t.showCapacity} onChange={(v) => setTweak('showCapacity', v)} />
+                <TweakToggle label="Team board"        value={t.showKanban}   onChange={(v) => setTweak('showKanban', v)} />
+                <TweakToggle label="Renewals"          value={t.showRenewals} onChange={(v) => setTweak('showRenewals', v)} />
+                <TweakToggle label="Pinned notes"      value={t.showNotes}    onChange={(v) => setTweak('showNotes', v)} />
+              </TweakSection>
+            )}
+          </TweaksPanel>
+        </AuthGate>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
