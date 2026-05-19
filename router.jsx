@@ -4,9 +4,10 @@
 //
 // Routes:
 //   #/                 → dashboard
+//   #/board            → tasks and follow-ups
 //   #/contractors      → contractors list
 //   #/contractors/c01  → contractor detail
-//   #/schools          → schools list (future)
+//   #/schools          → schools list
 //
 // Hash routing avoids any server-side setup — the file works the same
 // opened locally, on a static host, or behind an auth proxy later.

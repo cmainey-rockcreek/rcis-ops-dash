@@ -52,6 +52,7 @@
   <script type="text/babel" src="documents-section.jsx"></script>
   <script type="text/babel" src="notes-section.jsx"></script>
   <script type="text/babel" src="dashboard-calm.jsx"></script>
+  <script type="text/babel" src="page-tasks.jsx"></script>
   <script type="text/babel" src="page-contractors.jsx"></script>
   <script type="text/babel" src="page-schools.jsx"></script>
   <script type="text/babel" src="page-districts.jsx"></script>
@@ -95,6 +96,8 @@
         page = <DistrictDetailPage dark={t.dark} id={route.id} />;
       } else if (route.name === 'contacts') {
         page = <ContactsPage dark={t.dark} />;
+      } else if (route.name === 'board') {
+        page = <TasksPage dark={t.dark} />;
       } else {
         page = <DashboardCalm dark={t.dark} widgets={widgets} />;
       }

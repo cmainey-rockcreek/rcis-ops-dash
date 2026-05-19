@@ -96,14 +96,14 @@
           }}>⌘K</span>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button style={{
+          <button onClick={() => window.navigate('/board')} style={{
             height: 32, padding: '0 12px', borderRadius: 8,
             background: pal.accent, color: '#fff', border: 'none',
             fontSize: 13, fontWeight: 600,
             display: 'flex', alignItems: 'center', gap: 6,
             cursor: 'pointer',
           }}>
-            <Icon name="plus" size={14} stroke={2.2}/> New assignment
+            <Icon name="plus" size={14} stroke={2.2}/> New task
           </button>
           <div style={{ width: 1, height: 22, background: pal.border, margin: '0 4px' }} />
           <div style={{ display: 'flex' }}>
@@ -127,7 +127,7 @@
       { key: 'contacts',    icon: 'user',   name: 'Contacts',     to: '/contacts' },
       { key: 'districts',   icon: 'flag',   name: 'Districts',    to: '/districts',   badge: window.RCIS_DATA.DISTRICTS.length.toString() },
       { key: 'assignments', icon: 'cal',    name: 'Assignments',  to: '/assignments' },
-      { key: 'board',       icon: 'list',   name: 'Team Board',   to: '/board' },
+      { key: 'board',       icon: 'list',   name: 'Tasks',        to: '/board' },
       { key: 'renewals',    icon: 'file',   name: 'Renewals',     to: '/renewals',    badge: '5' },
     ];
     return (
