@@ -424,6 +424,7 @@
     const due = dueMeta(todo);
     const hasNotes = todo.notes && todo.notes.trim();
     const hasFiles = todo.attachments && todo.attachments.length > 0;
+    const commentCount = window.useTaskCommentCount ? window.useTaskCommentCount(todo.id) : 0;
     return (
       <div
         draggable
@@ -476,10 +477,15 @@
           {due.label && (
             <span style={{ fontSize: 10.5, color: due.tone, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{due.label}</span>
           )}
-          {(hasNotes || hasFiles) && (
+          {(hasNotes || hasFiles || commentCount > 0) && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: pal.textFaint }}>
               {hasNotes && <Icon name="list" size={11} stroke={2} />}
               {hasFiles && <Icon name="file" size={11} stroke={2} />}
+              {commentCount > 0 && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 10.5, fontWeight: 600 }}>
+                  <Icon name="msg" size={11} stroke={2} />{commentCount}
+                </span>
+              )}
             </span>
           )}
           <span style={{ marginLeft: 'auto', display: 'flex' }}>

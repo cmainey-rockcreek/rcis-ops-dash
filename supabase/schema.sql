@@ -37,6 +37,18 @@ create table if not exists public.team_profiles (
 );
 create index if not exists team_profiles_active_idx on public.team_profiles (active, full_name);
 
+-- ─── task_comments ───────────────────────────────────────────────────────
+-- Free-text discussion thread on a todo. Author resolves via team_profiles.
+create table if not exists public.task_comments (
+  id           text primary key,
+  todo_id      text not null references public.todos(id) on delete cascade,
+  author_id    uuid not null references public.team_profiles(id) on delete set null,
+  content      text not null,
+  created_at   timestamptz not null default now()
+);
+create index if not exists task_comments_todo_idx   on public.task_comments (todo_id, created_at);
+create index if not exists task_comments_author_idx on public.task_comments (author_id);
+
 -- ─── contacts ─────────────────────────────────────────────────────────────
 create table if not exists public.contacts (
   id            text primary key,
@@ -174,15 +186,30 @@ on conflict (id) do update set
 -- Enable RLS on all tables, then grant authenticated users full access.
 -- This means: only logged-in team members can read or write anything,
 -- and anonymous (logged-out) access is blocked.
-alter table public.todos        enable row level security;
+alter table public.todos         enable row level security;
+alter table public.task_comments enable row level security;
 alter table public.team_profiles enable row level security;
-alter table public.contacts     enable row level security;
-alter table public.documents    enable row level security;
-alter table public.entity_notes enable row level security;
+alter table public.contacts      enable row level security;
+alter table public.documents     enable row level security;
+alter table public.entity_notes  enable row level security;
 
 drop policy if exists "team full access" on public.todos;
 create policy "team full access" on public.todos
   for all to authenticated using (true) with check (true);
+
+drop policy if exists "team can read task comments" on public.task_comments;
+create policy "team can read task comments"
+  on public.task_comments for select to authenticated using (true);
+
+drop policy if exists "team can create own task comments" on public.task_comments;
+create policy "team can create own task comments"
+  on public.task_comments for insert to authenticated
+  with check (auth.uid() = author_id);
+
+drop policy if exists "team can delete own task comments" on public.task_comments;
+create policy "team can delete own task comments"
+  on public.task_comments for delete to authenticated
+  using (auth.uid() = author_id);
 
 drop policy if exists "team profiles visible to signed-in users" on public.team_profiles;
 create policy "team profiles visible to signed-in users" on public.team_profiles
@@ -212,6 +239,10 @@ create policy "team full access" on public.entity_notes
 -- Lets the app receive live updates when teammates change anything.
 do $$ begin
   alter publication supabase_realtime add table public.todos;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.task_comments;
 exception when duplicate_object then null;
 end $$;
 do $$ begin

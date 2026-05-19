@@ -194,6 +194,7 @@ window.Icon = function Icon({ name, size = 16, color = 'currentColor', stroke = 
     flag:   <><path d="M4 21V4h12l-2 4 2 4H4"/></>,
     flame:  <><path d="M12 22a6 6 0 006-6c0-4-3-5-3-9 0-2-1-3-3-3 0 5-6 6-6 12a6 6 0 006 6z"/></>,
     check:  <><path d="M4 12l5 5L20 6"/></>,
+    msg:    <><path d="M4 5h16v11H8l-4 4z"/></>,
     filter: <><path d="M3 5h18l-7 9v6l-4-2v-4z"/></>,
     map:    <><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v16M15 6v16"/></>,
     dot:    <><circle cx="12" cy="12" r="3" /></>,

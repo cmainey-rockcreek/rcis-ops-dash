@@ -344,6 +344,7 @@
     const PRIO = { high: '#D97757', medium: '#C98A2C', low: '#7A8290' };
     const dueLabel = formatDue(todo.due);
     const overdue = isDueOverdue(todo.due, todo.column);
+    const commentCount = window.useTaskCommentCount ? window.useTaskCommentCount(todo.id) : 0;
 
     return (
       <div
@@ -395,7 +396,7 @@
               fontVariantNumeric: 'tabular-nums',
             }}>{overdue ? '⚠ ' : ''}{dueLabel}</span>
           )}
-          {(todo.notes && todo.notes.trim()) || (todo.attachments && todo.attachments.length > 0) ? (
+          {(todo.notes && todo.notes.trim()) || (todo.attachments && todo.attachments.length > 0) || commentCount > 0 ? (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: pal.textFaint }}>
               {todo.notes && todo.notes.trim() && (
                 <span title="Has notes" style={{ display: 'inline-flex' }}>
@@ -409,6 +410,12 @@
                   {todo.attachments.length > 1 && (
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>{todo.attachments.length}</span>
                   )}
+                </span>
+              )}
+              {commentCount > 0 && (
+                <span title={`${commentCount} comment${commentCount === 1 ? '' : 's'}`}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 10.5, fontWeight: 600 }}>
+                  <Icon name="msg" size={11} stroke={2} />{commentCount}
                 </span>
               )}
             </span>

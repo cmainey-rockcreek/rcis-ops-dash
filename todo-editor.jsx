@@ -474,6 +474,11 @@
               onChange={(next) => set({ attachments: next })}
               pal={pal}
             />
+
+            {/* Comments — only on saved tasks; needs a real todo.id to attach to */}
+            {!isNew && draft.id && (
+              <Comments todoId={draft.id} pal={pal} />
+            )}
           </div>
 
           <div style={styles.footer}>
@@ -800,6 +805,132 @@
     if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
     if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
     return Math.floor(sec / 86400) + 'd ago';
+  }
+
+  // ─── Comments sub-component ──────────────────────────────────────────────
+  function Comments({ todoId, pal }) {
+    const comments = window.useTaskComments(todoId);
+    const current = window.TeamStore && window.TeamStore.current && window.TeamStore.current();
+    const [draft, setDraft] = React.useState('');
+    const [posting, setPosting] = React.useState(false);
+
+    const trimmed = draft.trim();
+    const submit = async () => {
+      if (!trimmed || posting) return;
+      setPosting(true);
+      try {
+        await window.CommentsStore.add(todoId, trimmed);
+        setDraft('');
+      } finally {
+        setPosting(false);
+      }
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        submit();
+      }
+    };
+
+    const removeOwn = (id) => {
+      if (!confirm('Delete this comment?')) return;
+      window.CommentsStore.remove(id);
+    };
+
+    return (
+      <div>
+        <div style={{
+          fontSize: 11, fontWeight: 600, letterSpacing: 0.4,
+          textTransform: 'uppercase', color: pal.textFaint, marginBottom: 5,
+        }}>
+          Comments
+          <span style={{ textTransform: 'none', fontWeight: 500, color: pal.textFaint, marginLeft: 6 }}>
+            · {comments.length === 0 ? 'start the conversation' : `${comments.length} so far`}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {comments.length === 0 ? (
+            <div style={{
+              padding: '12px 14px', fontSize: 12, color: pal.textFaint,
+              border: `1px dashed ${pal.border}`, borderRadius: 7,
+              textAlign: 'center',
+            }}>No comments yet.</div>
+          ) : (
+            comments.map((c) => {
+              const author = teamMember(c.authorId);
+              const mine = current && c.authorId === current.id;
+              return (
+                <div key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <OwnerAvatar id={c.authorId} size={24} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 2 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: pal.text }}>{author.name}</span>
+                      <span style={{ fontSize: 10.5, color: pal.textFaint }}>{timeAgo(c.createdAt)}</span>
+                      {mine && (
+                        <button onClick={() => removeOwn(c.id)} title="Delete comment"
+                          style={{
+                            marginLeft: 'auto',
+                            border: 'none', background: 'transparent',
+                            color: pal.textFaint, fontSize: 11, fontWeight: 500,
+                            cursor: 'pointer', padding: '0 4px', borderRadius: 4,
+                            fontFamily: 'inherit',
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.color = pal.warn}
+                          onMouseLeave={(e) => e.currentTarget.style.color = pal.textFaint}>
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                    <div style={{
+                      fontSize: 12.5, color: pal.text, lineHeight: 1.45,
+                      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    }}>{c.content}</div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={current ? 'Leave a comment… (Cmd+Enter to post)' : 'Sign in to leave a comment.'}
+            disabled={!current || posting}
+            rows={2}
+            style={{
+              width: '100%',
+              resize: 'vertical',
+              minHeight: 56,
+              padding: '8px 10px',
+              fontSize: 12.5, color: pal.text,
+              background: pal.card,
+              border: `1px solid ${pal.border}`, borderRadius: 7,
+              outline: 'none', fontFamily: 'inherit',
+              lineHeight: 1.4,
+            }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={submit} disabled={!current || !trimmed || posting}
+              style={{
+                padding: '6px 14px',
+                background: trimmed && current && !posting ? pal.accent : pal.chipBg,
+                color: trimmed && current && !posting ? '#fff' : pal.textFaint,
+                border: 'none', borderRadius: 6,
+                fontSize: 12, fontWeight: 600,
+                cursor: trimmed && current && !posting ? 'pointer' : 'default',
+                fontFamily: 'inherit',
+              }}>
+              {posting ? 'Posting…' : 'Comment'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   window.TodoEditor = TodoEditor;
