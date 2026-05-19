@@ -158,9 +158,13 @@ window.TodosStore = (() => {
     },
 
     async remove(id) {
+      const existing = state.find((t) => t.id === id);
       setState(state.filter((t) => t.id !== id));
       const { error } = await window.sb.from(TABLE).delete().eq('id', id);
       if (error) console.warn('todos.remove', error);
+      if (existing && window.deleteTaskAttachmentFiles) {
+        await window.deleteTaskAttachmentFiles(existing.attachments);
+      }
     },
 
     move(id, column) {

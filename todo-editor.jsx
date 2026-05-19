@@ -57,6 +57,85 @@
   // Public for the dashboard card to render small kind-badges.
   window.attachmentKindMeta = (kind) => KIND_META[kind] || KIND_META.link;
 
+  // ─── File upload helpers ──────────────────────────────────────────────────
+  // Files go to a private Supabase Storage bucket. Stored attachments carry
+  // a `storagePath` instead of a `url`; we generate signed URLs on demand
+  // when the user clicks to view.
+  const STORAGE_BUCKET = 'task-attachments';
+  const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+  const ALLOWED_UPLOAD_EXTS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.txt'];
+  const UPLOAD_ACCEPT = ALLOWED_UPLOAD_EXTS.join(',');
+
+  function formatBytes(n) {
+    if (n == null) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function validateUpload(file) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return 'File is too large. Max size is 10 MB.';
+    }
+    const lower = file.name.toLowerCase();
+    const extOk = ALLOWED_UPLOAD_EXTS.some((ext) => lower.endsWith(ext));
+    if (!extOk) {
+      return 'Unsupported file type. Allowed: PDF, Word, Excel, PowerPoint, CSV, TXT.';
+    }
+    return null;
+  }
+
+  async function uploadAttachmentFile(file) {
+    if (!window.sb) throw new Error('Supabase client not ready.');
+    const id = attachmentId();
+    const safeName = file.name.replace(/[^\w.\-]+/g, '_');
+    const storagePath = `${id}/${safeName}`;
+    const { error } = await window.sb.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+    if (error) throw error;
+    const kind = detectAttachmentKind('', file.name);
+    return {
+      id,
+      kind,
+      name: file.name,
+      storagePath,
+      size: file.size,
+      uploadedAt: Date.now(),
+      source: 'upload',
+    };
+  }
+
+  async function openUploadedAttachment(attachment) {
+    if (!window.sb) return;
+    const { data, error } = await window.sb.storage.from(STORAGE_BUCKET)
+      .createSignedUrl(attachment.storagePath, 60);
+    if (error || !data) {
+      alert('Could not open file: ' + (error && error.message ? error.message : 'unknown error'));
+      return;
+    }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  // Best-effort cleanup. Failures are logged, not surfaced — the file may
+  // already have been removed or never made it to the bucket.
+  async function deleteAttachmentFile(attachment) {
+    if (!attachment || !attachment.storagePath || !window.sb) return;
+    const { error } = await window.sb.storage.from(STORAGE_BUCKET)
+      .remove([attachment.storagePath]);
+    if (error) console.warn('attachment cleanup failed', error);
+  }
+
+  window.deleteTaskAttachmentFiles = async (attachments) => {
+    if (!attachments || !window.sb) return;
+    const paths = attachments.filter((a) => a && a.storagePath).map((a) => a.storagePath);
+    if (!paths.length) return;
+    const { error } = await window.sb.storage.from(STORAGE_BUCKET).remove(paths);
+    if (error) console.warn('task attachment cleanup failed', error);
+  };
+
   function TodoEditor({ todo, pal, onSave, onDelete, onClose, isNew }) {
     const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
     // Old todos in localStorage may pre-date notes/attachments — default them.
@@ -420,7 +499,10 @@
     const [adding, setAdding] = React.useState(false);
     const [url, setUrl] = React.useState('');
     const [name, setName] = React.useState('');
+    const [uploading, setUploading] = React.useState(null); // file name being uploaded
+    const [uploadError, setUploadError] = React.useState(null);
     const urlRef = React.useRef(null);
+    const fileInputRef = React.useRef(null);
 
     const reset = () => { setAdding(false); setUrl(''); setName(''); };
     const commit = () => {
@@ -432,10 +514,42 @@
         id: attachmentId(),
         kind, url: trimmed, name: finalName,
         addedAt: Date.now(),
+        source: 'link',
       }]);
       reset();
     };
-    const remove = (id) => onChange(attachments.filter((a) => a.id !== id));
+
+    const remove = async (id) => {
+      const target = attachments.find((a) => a.id === id);
+      onChange(attachments.filter((a) => a.id !== id));
+      if (target && target.storagePath) {
+        await deleteAttachmentFile(target);
+      }
+    };
+
+    const triggerFilePicker = () => {
+      setUploadError(null);
+      if (fileInputRef.current) fileInputRef.current.click();
+    };
+
+    const onFileSelected = async (event) => {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = '';
+      if (!file) return;
+      const problem = validateUpload(file);
+      if (problem) { setUploadError(problem); return; }
+      setUploading(file.name);
+      setUploadError(null);
+      try {
+        const attachment = await uploadAttachmentFile(file);
+        onChange([...attachments, attachment]);
+      } catch (err) {
+        console.warn('upload failed', err);
+        setUploadError((err && err.message) ? err.message : 'Upload failed.');
+      } finally {
+        setUploading(null);
+      }
+    };
 
     React.useEffect(() => {
       if (adding && urlRef.current) urlRef.current.focus();
@@ -449,7 +563,7 @@
             textTransform: 'uppercase', color: pal.textFaint, marginBottom: 5,
           }}>Attachments
             <span style={{ textTransform: 'none', fontWeight: 500, color: pal.textFaint, marginLeft: 6 }}>
-              · paste a Google Drive / Dropbox / any URL
+              · upload a document or paste a share URL
             </span>
           </div>
         </div>
@@ -457,6 +571,31 @@
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {attachments.map((a) => {
             const meta = KIND_META[a.kind] || KIND_META.link;
+            const isUpload = !!a.storagePath;
+            const subtitle = isUpload
+              ? `${meta.full} · ${formatBytes(a.size)}`
+              : `${meta.full} · ${hostOf(a.url)}`;
+            const openProps = isUpload
+              ? {
+                  as: 'button',
+                  onClick: (e) => { e.stopPropagation(); openUploadedAttachment(a); },
+                }
+              : {
+                  as: 'a',
+                  href: a.url,
+                  target: '_blank',
+                  rel: 'noreferrer',
+                  onClick: (e) => e.stopPropagation(),
+                };
+            const linkStyle = {
+              fontSize: 12.5, color: pal.text, fontWeight: 500,
+              textDecoration: 'none',
+              display: 'block',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              background: 'transparent', border: 'none', padding: 0,
+              cursor: 'pointer', textAlign: 'left', width: '100%',
+              fontFamily: 'inherit',
+            };
             return (
               <div key={a.id} style={{
                 display: 'flex', alignItems: 'center', gap: 10,
@@ -467,21 +606,26 @@
               }}>
                 <KindBadge meta={meta} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <a href={a.url} target="_blank" rel="noreferrer"
-                     onClick={(e) => e.stopPropagation()}
-                     style={{
-                       fontSize: 12.5, color: pal.text, fontWeight: 500,
-                       textDecoration: 'none',
-                       display: 'block',
-                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                     }}
-                     onMouseEnter={(e) => e.currentTarget.style.color = pal.accent}
-                     onMouseLeave={(e) => e.currentTarget.style.color = pal.text}>
-                    {a.name}
-                  </a>
+                  {isUpload ? (
+                    <button
+                      onClick={openProps.onClick}
+                      style={linkStyle}
+                      onMouseEnter={(e) => e.currentTarget.style.color = pal.accent}
+                      onMouseLeave={(e) => e.currentTarget.style.color = pal.text}>
+                      {a.name}
+                    </button>
+                  ) : (
+                    <a href={openProps.href} target={openProps.target} rel={openProps.rel}
+                       onClick={openProps.onClick}
+                       style={linkStyle}
+                       onMouseEnter={(e) => e.currentTarget.style.color = pal.accent}
+                       onMouseLeave={(e) => e.currentTarget.style.color = pal.text}>
+                      {a.name}
+                    </a>
+                  )}
                   <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 1,
                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {meta.full} · {hostOf(a.url)}
+                    {subtitle}
                   </div>
                 </div>
                 <button onClick={() => remove(a.id)}
@@ -553,26 +697,63 @@
               </div>
             </div>
           ) : (
-            <button onClick={() => setAdding(true)}
-              style={{
-                padding: '8px 12px',
-                background: 'transparent',
-                color: pal.textSoft,
-                border: `1px dashed ${pal.border}`,
-                borderRadius: 7,
-                fontSize: 12.5, fontWeight: 500,
-                cursor: 'pointer', fontFamily: 'inherit',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = pal.accent; e.currentTarget.style.color = pal.accent; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = pal.border; e.currentTarget.style.color = pal.textSoft; }}>
-              <Icon name="plus" size={12} stroke={2.4} /> Add link
-            </button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={triggerFilePicker}
+                disabled={!!uploading}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  background: 'transparent',
+                  color: uploading ? pal.textFaint : pal.textSoft,
+                  border: `1px dashed ${pal.border}`,
+                  borderRadius: 7,
+                  fontSize: 12.5, fontWeight: 500,
+                  cursor: uploading ? 'default' : 'pointer', fontFamily: 'inherit',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                }}
+                onMouseEnter={(e) => { if (!uploading) { e.currentTarget.style.borderColor = pal.accent; e.currentTarget.style.color = pal.accent; } }}
+                onMouseLeave={(e) => { if (!uploading) { e.currentTarget.style.borderColor = pal.border; e.currentTarget.style.color = pal.textSoft; } }}>
+                <Icon name="file" size={12} stroke={2} /> {uploading ? `Uploading ${uploading}…` : 'Upload file'}
+              </button>
+              <button onClick={() => setAdding(true)}
+                disabled={!!uploading}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  background: 'transparent',
+                  color: pal.textSoft,
+                  border: `1px dashed ${pal.border}`,
+                  borderRadius: 7,
+                  fontSize: 12.5, fontWeight: 500,
+                  cursor: uploading ? 'default' : 'pointer', fontFamily: 'inherit',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                }}
+                onMouseEnter={(e) => { if (!uploading) { e.currentTarget.style.borderColor = pal.accent; e.currentTarget.style.color = pal.accent; } }}
+                onMouseLeave={(e) => { if (!uploading) { e.currentTarget.style.borderColor = pal.border; e.currentTarget.style.color = pal.textSoft; } }}>
+                <Icon name="plus" size={12} stroke={2.4} /> Add link
+              </button>
+            </div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={UPLOAD_ACCEPT}
+            onChange={onFileSelected}
+            style={{ display: 'none' }}
+          />
+          {uploadError && (
+            <div style={{
+              fontSize: 11.5, color: pal.warn,
+              padding: '6px 10px',
+              background: pal.warnSoft || 'transparent',
+              border: `1px solid ${pal.warn}`,
+              borderRadius: 6,
+              marginTop: 2,
+            }}>{uploadError}</div>
           )}
         </div>
         <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 6, lineHeight: 1.4 }}>
-          Uploading files from your computer needs backend storage — coming when we wire up Supabase.
-          For now, drop your file in Google Drive / Dropbox and paste the share link.
+          Documents (PDF, Word, Excel, PowerPoint, CSV, TXT) up to 10 MB. Or paste a Google Drive / Dropbox / any URL.
         </div>
       </div>
     );
