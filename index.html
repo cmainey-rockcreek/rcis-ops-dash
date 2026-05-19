@@ -72,8 +72,31 @@
       "showNotes": true
     }/*EDITMODE-END*/;
 
+    const THEME_KEY = 'rcis.theme';
+    function readSavedTheme() {
+      try {
+        const v = localStorage.getItem(THEME_KEY);
+        if (v === 'dark') return true;
+        if (v === 'light') return false;
+      } catch (e) {}
+      return null;
+    }
+
     function App() {
-      const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+      const savedDark = readSavedTheme();
+      const initialTweaks = savedDark === null
+        ? TWEAK_DEFAULTS
+        : { ...TWEAK_DEFAULTS, dark: savedDark };
+      const [t, setTweak] = useTweaks(initialTweaks);
+
+      React.useEffect(() => {
+        window.toggleDark = () => {
+          const next = !t.dark;
+          setTweak('dark', next);
+          try { localStorage.setItem(THEME_KEY, next ? 'dark' : 'light'); } catch (e) {}
+        };
+      }, [t.dark, setTweak]);
+
       const route = useRoute();
       const widgets = {
         stats: t.showStats,

@@ -8,6 +8,7 @@
   // ─── Palette ──────────────────────────────────────────────────────────────
   function calmPalette(dark) {
     return dark ? {
+      dark: true,
       page: '#15171C',
       card: '#1D2026',
       cardAlt: '#23262D',
@@ -33,6 +34,7 @@
       railHover: 'rgba(255,255,255,.04)',
       inputBg: 'rgba(255,255,255,.04)',
     } : {
+      dark: false,
       page: '#FBF8F3',
       card: '#FFFFFF',
       cardAlt: '#FAF7F1',
@@ -104,6 +106,20 @@
             cursor: 'pointer',
           }}>
             <Icon name="plus" size={14} stroke={2.2}/> New task
+          </button>
+          <button onClick={() => window.toggleDark && window.toggleDark()}
+            title={pal.dark ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-label={pal.dark ? 'Switch to light mode' : 'Switch to dark mode'}
+            style={{
+              width: 32, height: 32, padding: 0, borderRadius: 8,
+              background: 'transparent', color: pal.textSoft,
+              border: `1px solid ${pal.border}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = pal.text; e.currentTarget.style.borderColor = pal.textFaint; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = pal.textSoft; e.currentTarget.style.borderColor = pal.border; }}>
+            <Icon name={pal.dark ? 'sun' : 'moon'} size={15} stroke={1.8} />
           </button>
           <div style={{ width: 1, height: 22, background: pal.border, margin: '0 4px' }} />
           <div style={{ display: 'flex' }}>

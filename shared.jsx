@@ -195,6 +195,8 @@ window.Icon = function Icon({ name, size = 16, color = 'currentColor', stroke = 
     flame:  <><path d="M12 22a6 6 0 006-6c0-4-3-5-3-9 0-2-1-3-3-3 0 5-6 6-6 12a6 6 0 006 6z"/></>,
     check:  <><path d="M4 12l5 5L20 6"/></>,
     msg:    <><path d="M4 5h16v11H8l-4 4z"/></>,
+    sun:    <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></>,
+    moon:   <><path d="M21 14a8 8 0 01-11-11 8 8 0 1011 11z"/></>,
     filter: <><path d="M3 5h18l-7 9v6l-4-2v-4z"/></>,
     map:    <><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v16M15 6v16"/></>,
     dot:    <><circle cx="12" cy="12" r="3" /></>,
