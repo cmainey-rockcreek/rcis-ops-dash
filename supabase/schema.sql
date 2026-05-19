@@ -37,6 +37,48 @@ create table if not exists public.team_profiles (
 );
 create index if not exists team_profiles_active_idx on public.team_profiles (active, full_name);
 
+-- ─── coverage_gaps ───────────────────────────────────────────────────────
+-- Tracked needs (school-tied or district-wide). Drive the home page widget
+-- and the Matchmaker page. Bill rate, modality, urgency, attachments and
+-- notes all live on the row; comments live on gap_comments below.
+create table if not exists public.coverage_gaps (
+  id             text primary key,
+  scope          text not null default 'school' check (scope in ('school','district')),
+  school_id      text,
+  school_name    text,
+  district_id    text,
+  district_name  text not null,
+  state          text not null,
+  spec           text not null,
+  hours          numeric not null,
+  modality       text not null default 'onsite' check (modality in ('onsite','tele','either')),
+  priority       text not null default 'medium' check (priority in ('urgent','high','medium','low')),
+  bill_rate      numeric,
+  note           text default '',
+  status         text not null default 'open' check (status in ('open','filled','closed')),
+  attachments    jsonb not null default '[]',
+  posted_at      timestamptz not null default now(),
+  created_by     uuid references public.team_profiles(id) on delete set null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+create index if not exists coverage_gaps_status_idx     on public.coverage_gaps (status, priority);
+create index if not exists coverage_gaps_state_idx      on public.coverage_gaps (state);
+create index if not exists coverage_gaps_school_idx     on public.coverage_gaps (school_id) where school_id is not null;
+create index if not exists coverage_gaps_district_idx   on public.coverage_gaps (district_id) where district_id is not null;
+create index if not exists coverage_gaps_updated_idx    on public.coverage_gaps (updated_at desc);
+
+-- ─── gap_comments ────────────────────────────────────────────────────────
+create table if not exists public.gap_comments (
+  id           text primary key,
+  gap_id       text not null references public.coverage_gaps(id) on delete cascade,
+  author_id    uuid not null references public.team_profiles(id) on delete set null,
+  content      text not null,
+  created_at   timestamptz not null default now()
+);
+create index if not exists gap_comments_gap_idx    on public.gap_comments (gap_id, created_at);
+create index if not exists gap_comments_author_idx on public.gap_comments (author_id);
+
 -- ─── task_comments ───────────────────────────────────────────────────────
 -- Free-text discussion thread on a todo. Author resolves via team_profiles.
 create table if not exists public.task_comments (
@@ -97,6 +139,10 @@ $$;
 
 drop trigger if exists touch_todos on public.todos;
 create trigger touch_todos before update on public.todos
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_coverage_gaps on public.coverage_gaps;
+create trigger touch_coverage_gaps before update on public.coverage_gaps
   for each row execute function public.touch_updated_at();
 
 drop trigger if exists touch_team_profiles on public.team_profiles;
@@ -186,8 +232,10 @@ on conflict (id) do update set
 -- Enable RLS on all tables, then grant authenticated users full access.
 -- This means: only logged-in team members can read or write anything,
 -- and anonymous (logged-out) access is blocked.
-alter table public.todos         enable row level security;
-alter table public.task_comments enable row level security;
+alter table public.todos          enable row level security;
+alter table public.task_comments  enable row level security;
+alter table public.coverage_gaps  enable row level security;
+alter table public.gap_comments   enable row level security;
 alter table public.team_profiles enable row level security;
 alter table public.contacts      enable row level security;
 alter table public.documents     enable row level security;
@@ -209,6 +257,24 @@ create policy "team can create own task comments"
 drop policy if exists "team can delete own task comments" on public.task_comments;
 create policy "team can delete own task comments"
   on public.task_comments for delete to authenticated
+  using (auth.uid() = author_id);
+
+drop policy if exists "team full access" on public.coverage_gaps;
+create policy "team full access" on public.coverage_gaps
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "team can read gap comments" on public.gap_comments;
+create policy "team can read gap comments"
+  on public.gap_comments for select to authenticated using (true);
+
+drop policy if exists "team can create own gap comments" on public.gap_comments;
+create policy "team can create own gap comments"
+  on public.gap_comments for insert to authenticated
+  with check (auth.uid() = author_id);
+
+drop policy if exists "team can delete own gap comments" on public.gap_comments;
+create policy "team can delete own gap comments"
+  on public.gap_comments for delete to authenticated
   using (auth.uid() = author_id);
 
 drop policy if exists "team profiles visible to signed-in users" on public.team_profiles;
@@ -243,6 +309,14 @@ exception when duplicate_object then null;
 end $$;
 do $$ begin
   alter publication supabase_realtime add table public.task_comments;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.coverage_gaps;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.gap_comments;
 exception when duplicate_object then null;
 end $$;
 do $$ begin

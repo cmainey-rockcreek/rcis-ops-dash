@@ -355,7 +355,7 @@
             <SchoolsInDistrict r={r} pal={pal} />
             <window.ContactsSection pal={pal} scope="district" scopeId={d.id} />
             <ContractorsAcross r={r} pal={pal} />
-            <DistrictGapsCard r={r} pal={pal} />
+            <DistrictGapsCard d={d} pal={pal} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
             <RevenueCard r={r} pal={pal} />
@@ -544,38 +544,106 @@
     );
   }
 
-  function DistrictGapsCard({ r, pal }) {
-    return (
-      <Section pal={pal} title="Open coverage" badge={r.gaps.length} action={r.gaps.length ? '+ Add gap' : null}>
-        {r.gaps.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: pal.textFaint, fontStyle: 'italic' }}>
-            No open coverage gaps in this district. 🎉
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {r.gaps.map((g) => (
-              <div key={g.id} style={{
-                padding: '10px 12px',
-                background: g.priority === 'urgent' ? pal.warnSoft : pal.cardAlt,
-                border: `1px solid ${g.priority === 'urgent' ? pal.warn + '40' : pal.borderSoft}`,
-                borderRadius: 7,
-                display: 'flex', alignItems: 'center', gap: 10,
-              }}>
-                <SpecChip code={g.spec} filled />
-                <div style={{ flex: 1, fontSize: 12.5, color: pal.text }}>
-                  <span style={{ fontWeight: 600 }}>{g.school}</span>
-                  <span style={{ color: pal.textSoft }}> · {g.hours}h / wk · open {g.posted}</span>
-                </div>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
-                  color: g.priority === 'urgent' ? pal.warn : pal.textSoft,
-                }}>{g.priority}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
+  function DistrictGapsCard({ d, pal }) {
+    const all = window.useCoverageGaps ? window.useCoverageGaps() : [];
+    const gaps = React.useMemo(
+      () => all.filter((g) => g.status === 'open' && g.districtId === d.id),
+      [all, d.id],
     );
+    const [editor, setEditor] = React.useState(null);
+
+    const openLogDistrict = () => setEditor({
+      isNew: true,
+      gap: {
+        scope: 'district',
+        schoolId: null,
+        schoolName: null,
+        districtId: d.id,
+        districtName: d.name,
+        state: d.state,
+      },
+    });
+    const openEdit = (g) => setEditor({ isNew: false, gap: { ...g } });
+    const closeEditor = () => setEditor(null);
+    const saveEditor = async (patch) => {
+      if (editor.isNew) {
+        const { id, ...rest } = patch;
+        await window.GapsStore.add(rest);
+      } else {
+        await window.GapsStore.update(editor.gap.id, patch);
+      }
+      closeEditor();
+    };
+    const deleteEditor = async () => {
+      await window.GapsStore.remove(editor.gap.id);
+      closeEditor();
+    };
+
+    const logAction = (
+      <button onClick={openLogDistrict} style={{
+        background: 'transparent', border: 'none',
+        color: pal.accent, fontSize: 12, fontWeight: 500,
+        cursor: 'pointer', fontFamily: 'inherit', padding: 0,
+      }}>+ Log district-wide gap</button>
+    );
+
+    return (
+      <>
+        <Section pal={pal} title="Open coverage" badge={gaps.length} action={logAction}>
+          {gaps.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: pal.textFaint, fontStyle: 'italic' }}>
+              No open coverage gaps in this district.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {gaps.map((g) => {
+                const where = g.scope === 'district'
+                  ? `${g.districtName} (district-wide)`
+                  : g.schoolName;
+                return (
+                  <button key={g.id} onClick={() => openEdit(g)} style={{
+                    padding: '10px 12px',
+                    background: g.priority === 'urgent' ? pal.warnSoft : pal.cardAlt,
+                    border: `1px solid ${g.priority === 'urgent' ? pal.warn + '40' : pal.borderSoft}`,
+                    borderRadius: 7,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    width: '100%', textAlign: 'left',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}>
+                    <SpecChip code={g.spec} filled />
+                    <div style={{ flex: 1, fontSize: 12.5, color: pal.text }}>
+                      <span style={{ fontWeight: 600 }}>{where}</span>
+                      <span style={{ color: pal.textSoft }}> · {g.hours}h / wk · open {districtGapPostedLabel(g)}</span>
+                    </div>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
+                      color: g.priority === 'urgent' ? pal.warn : pal.textSoft,
+                    }}>{g.priority}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </Section>
+        {editor && window.GapEditor && (
+          <window.GapEditor
+            gap={editor.gap}
+            pal={pal}
+            isNew={editor.isNew}
+            onSave={saveEditor}
+            onDelete={deleteEditor}
+            onClose={closeEditor}
+          />
+        )}
+      </>
+    );
+  }
+
+  function districtGapPostedLabel(g) {
+    if (!g || !g.postedAt) return 'today';
+    const days = Math.floor((Date.now() - g.postedAt) / (24 * 60 * 60 * 1000));
+    if (days <= 0) return 'today';
+    return `${days}d`;
   }
 
   function RevenueCard({ r, pal }) {

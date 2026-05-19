@@ -81,32 +81,97 @@
 
   // ─── Coverage gaps ────────────────────────────────────────────────────────
   function CoverageGaps({ pal }) {
-    const rows = window.RCIS_DATA.COVERAGE_GAPS.slice(0, 6);
-    return (
-      <Card pal={pal} title="Coverage gaps" count={7} action="View all →">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {rows.map((g, i) => (
-            <div key={g.id} style={{
-              display: 'grid',
-              gridTemplateColumns: 'auto 1fr auto auto auto',
-              gap: 12, alignItems: 'center',
-              padding: '8px 4px',
-              borderBottom: i < rows.length - 1 ? `1px solid ${pal.borderSoft}` : 'none',
-              fontSize: 12.5,
-            }}>
-              <PrioDot prio={g.priority} />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ color: pal.text, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.school}</div>
-                <div style={{ color: pal.textFaint, fontSize: 11, marginTop: 1 }}>{g.district} · {g.state}</div>
-              </div>
-              <SpecChip code={g.spec} />
-              <div style={{ color: pal.textSoft, fontSize: 12, fontVariantNumeric: 'tabular-nums', width: 56, textAlign: 'right' }}>{g.hours}h/wk</div>
-              <div style={{ color: pal.textFaint, fontSize: 11, width: 32, textAlign: 'right' }}>{g.posted}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
+    const allGaps = window.useCoverageGaps ? window.useCoverageGaps() : [];
+    const openGaps = React.useMemo(
+      () => allGaps.filter((g) => g.status === 'open'),
+      [allGaps],
     );
+    const rows = openGaps.slice(0, 6);
+    const [editor, setEditor] = React.useState(null);
+
+    const openNew = () => {
+      setEditor({ isNew: true, gap: {} });
+    };
+    const openEdit = (g) => setEditor({ isNew: false, gap: { ...g } });
+    const closeEditor = () => setEditor(null);
+    const saveEditor = async (patch) => {
+      if (editor.isNew) {
+        const { id, ...rest } = patch;
+        await window.GapsStore.add(rest);
+      } else {
+        await window.GapsStore.update(editor.gap.id, patch);
+      }
+      closeEditor();
+    };
+    const deleteEditor = async () => {
+      await window.GapsStore.remove(editor.gap.id);
+      closeEditor();
+    };
+
+    return (
+      <>
+        <Card pal={pal} title="Coverage gaps" count={openGaps.length}
+              action={(
+                <button onClick={openNew} style={{
+                  background: 'transparent', border: 'none',
+                  color: pal.accent, fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}>+ Log gap</button>
+              )}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {rows.length === 0 && (
+              <div style={{ padding: '14px 4px', fontSize: 12, color: pal.textFaint }}>
+                No open coverage gaps logged.
+              </div>
+            )}
+            {rows.map((g, i) => {
+              const displayName = g.scope === 'district'
+                ? `${g.districtName} (district-wide)`
+                : (g.schoolName || g.districtName);
+              const posted = relPosted(g.postedAt);
+              return (
+                <button key={g.id} onClick={() => openEdit(g)} style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'auto 1fr auto auto auto',
+                  gap: 12, alignItems: 'center',
+                  padding: '8px 4px',
+                  borderBottom: i < rows.length - 1 ? `1px solid ${pal.borderSoft}` : 'none',
+                  fontSize: 12.5,
+                  background: 'transparent', border: 'none', width: '100%',
+                  textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                  <PrioDot prio={g.priority} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: pal.text, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</div>
+                    <div style={{ color: pal.textFaint, fontSize: 11, marginTop: 1 }}>{g.districtName} · {g.state}</div>
+                  </div>
+                  <SpecChip code={g.spec} />
+                  <div style={{ color: pal.textSoft, fontSize: 12, fontVariantNumeric: 'tabular-nums', width: 56, textAlign: 'right' }}>{g.hours}h/wk</div>
+                  <div style={{ color: pal.textFaint, fontSize: 11, width: 36, textAlign: 'right' }}>{posted}</div>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+        {editor && (
+          <window.GapEditor
+            gap={editor.gap}
+            pal={pal}
+            isNew={editor.isNew}
+            onSave={saveEditor}
+            onDelete={deleteEditor}
+            onClose={closeEditor}
+          />
+        )}
+      </>
+    );
+  }
+
+  function relPosted(ms) {
+    if (!ms) return '';
+    const days = Math.floor((Date.now() - ms) / (24 * 60 * 60 * 1000));
+    if (days < 1) return 'today';
+    return days + 'd';
   }
 
   // ─── Capacity now ─────────────────────────────────────────────────────────

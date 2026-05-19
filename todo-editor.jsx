@@ -955,4 +955,18 @@
 
   window.TodoEditor = TodoEditor;
   window.LinkTypeBadge = LinkTypeBadge;
+  // Reusable helpers so other editors (e.g., gap-editor.jsx) can share the
+  // same Supabase-Storage upload + signed-URL flow.
+  window.attachmentHelpers = {
+    validateUpload,
+    uploadAttachmentFile,
+    openUploadedAttachment,
+    deleteAttachmentFile,
+    formatBytes,
+    detectAttachmentKind,
+    defaultAttachmentName,
+    attachmentId,
+    KIND_META,
+    UPLOAD_ACCEPT,
+  };
 })();

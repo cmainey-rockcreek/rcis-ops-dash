@@ -616,40 +616,103 @@
   }
 
   function CoverageGapsCard({ s, pal }) {
-    const gaps = window.RCIS_DATA.COVERAGE_GAPS.filter((g) =>
-      g.school.startsWith(s.name.split(' ')[0]) && g.state === s.state
+    const all = window.useCoverageGaps ? window.useCoverageGaps() : [];
+    const gaps = React.useMemo(
+      () => all.filter((g) => g.status === 'open' && g.schoolId === s.id),
+      [all, s.id],
     );
+    const [editor, setEditor] = React.useState(null);
+
+    const openLog = () => setEditor({
+      isNew: true,
+      gap: {
+        scope: 'school',
+        schoolId: s.id,
+        schoolName: s.name,
+        districtId: s.district || null,
+        districtName: s.districtName || '',
+        state: s.state,
+      },
+    });
+    const openEdit = (g) => setEditor({ isNew: false, gap: { ...g } });
+    const closeEditor = () => setEditor(null);
+    const saveEditor = async (patch) => {
+      if (editor.isNew) {
+        const { id, ...rest } = patch;
+        await window.GapsStore.add(rest);
+      } else {
+        await window.GapsStore.update(editor.gap.id, patch);
+      }
+      closeEditor();
+    };
+    const deleteEditor = async () => {
+      await window.GapsStore.remove(editor.gap.id);
+      closeEditor();
+    };
+
+    const logAction = (
+      <button onClick={openLog} style={{
+        background: 'transparent', border: 'none',
+        color: pal.accent, fontSize: 12, fontWeight: 500,
+        cursor: 'pointer', fontFamily: 'inherit', padding: 0,
+      }}>+ Log gap</button>
+    );
+
     return (
-      <Section pal={pal} title="Open coverage" badge={gaps.length} action={gaps.length ? '+ Add gap' : null}>
-        {gaps.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: pal.textFaint, fontStyle: 'italic' }}>
-            No open coverage gaps at this school. 🎉
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {gaps.map((g) => (
-              <div key={g.id} style={{
-                padding: '10px 12px',
-                background: g.priority === 'urgent' ? pal.warnSoft : pal.cardAlt,
-                border: `1px solid ${g.priority === 'urgent' ? pal.warn + '40' : pal.borderSoft}`,
-                borderRadius: 7,
-                display: 'flex', alignItems: 'center', gap: 10,
-              }}>
-                <SpecChip code={g.spec} filled />
-                <div style={{ flex: 1, fontSize: 12.5, color: pal.text }}>
-                  <span style={{ fontWeight: 600 }}>{g.hours}h / wk</span>
-                  <span style={{ color: pal.textSoft }}> · open {g.posted}</span>
-                </div>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
-                  color: g.priority === 'urgent' ? pal.warn : pal.textSoft,
-                }}>{g.priority}</span>
-              </div>
-            ))}
-          </div>
+      <>
+        <Section pal={pal} title="Open coverage" badge={gaps.length} action={logAction}>
+          {gaps.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: pal.textFaint, fontStyle: 'italic' }}>
+              No open coverage gaps at this school.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {gaps.map((g) => (
+                <button key={g.id} onClick={() => openEdit(g)} style={{
+                  padding: '10px 12px',
+                  background: g.priority === 'urgent' ? pal.warnSoft : pal.cardAlt,
+                  border: `1px solid ${g.priority === 'urgent' ? pal.warn + '40' : pal.borderSoft}`,
+                  borderRadius: 7,
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  width: '100%', textAlign: 'left',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                  <SpecChip code={g.spec} filled />
+                  <div style={{ flex: 1, fontSize: 12.5, color: pal.text }}>
+                    <span style={{ fontWeight: 600 }}>{g.hours}h / wk</span>
+                    <span style={{ color: pal.textSoft }}> · open {gapPostedLabel(g)}</span>
+                    {g.modality && g.modality !== 'onsite' && (
+                      <span style={{ color: pal.textSoft }}> · {g.modality}</span>
+                    )}
+                  </div>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
+                    color: g.priority === 'urgent' ? pal.warn : pal.textSoft,
+                  }}>{g.priority}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </Section>
+        {editor && window.GapEditor && (
+          <window.GapEditor
+            gap={editor.gap}
+            pal={pal}
+            isNew={editor.isNew}
+            onSave={saveEditor}
+            onDelete={deleteEditor}
+            onClose={closeEditor}
+          />
         )}
-      </Section>
+      </>
     );
+  }
+
+  function gapPostedLabel(g) {
+    if (!g || !g.postedAt) return 'today';
+    const days = Math.floor((Date.now() - g.postedAt) / (24 * 60 * 60 * 1000));
+    if (days <= 0) return 'today';
+    return `${days}d`;
   }
 
   function ContactsCard({ s, pal }) {

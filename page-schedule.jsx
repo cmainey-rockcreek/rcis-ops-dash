@@ -33,20 +33,9 @@
   const TOP_N = 5;
   const ONSITE_RADIUS_MILES = 100;
 
-  // Flat default bill rate. Each gap can carry its own `billRate`, or the
-  // user can override per-gap inline (persisted to localStorage below).
+  // Flat default bill rate. Each gap carries its own `billRate` on the row;
+  // inline edits in the Matchmaker write directly to Supabase via GapsStore.
   const DEFAULT_BILL_RATE = 85;
-  const RATE_OVERRIDES_KEY = 'rcis.gap.billRates.v1';
-
-  function loadRateOverrides() {
-    try {
-      const raw = localStorage.getItem(RATE_OVERRIDES_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) { return {}; }
-  }
-  function saveRateOverrides(map) {
-    try { localStorage.setItem(RATE_OVERRIDES_KEY, JSON.stringify(map)); } catch (e) {}
-  }
 
   function effectiveRate(gap, overrides) {
     const o = overrides && overrides[gap.id];
@@ -109,10 +98,26 @@
   function freeHours(c) {
     return Math.max(0, (c.cap || 0) - (c.assigned || 0));
   }
-  function daysPosted(s) {
-    if (!s) return 0;
-    const m = /^(\d+)d/.exec(String(s));
-    return m ? parseInt(m[1], 10) : 0;
+  function daysPosted(g) {
+    if (!g) return 0;
+    if (Number.isFinite(g)) return Math.max(0, Math.floor((Date.now() - g) / (24 * 60 * 60 * 1000)));
+    if (typeof g === 'string') {
+      const m = /^(\d+)d/.exec(g);
+      return m ? parseInt(m[1], 10) : 0;
+    }
+    if (Number.isFinite(g.postedAt)) {
+      return Math.max(0, Math.floor((Date.now() - g.postedAt) / (24 * 60 * 60 * 1000)));
+    }
+    if (typeof g.posted === 'string') {
+      const m = /^(\d+)d/.exec(g.posted);
+      return m ? parseInt(m[1], 10) : 0;
+    }
+    return 0;
+  }
+  function postedLabel(g) {
+    const d = daysPosted(g);
+    if (d <= 0) return 'today';
+    return d + 'd';
   }
 
   // Contractor city is stored as "Reston, VA" (with state suffix). Schools
@@ -143,8 +148,14 @@
   }
 
   function findSchool(gap) {
+    if (!gap) return null;
     const list = (window.RCIS_DATA && window.RCIS_DATA.SCHOOLS) || [];
-    return list.find((s) => s.name === gap.school && s.state === gap.state) || null;
+    if (gap.schoolId) {
+      return list.find((s) => s.id === gap.schoolId) || null;
+    }
+    const name = gap.schoolName || gap.school;
+    if (!name) return null;
+    return list.find((s) => s.name === name && s.state === gap.state) || null;
   }
 
   function gapModality(g) { return g.modality || 'onsite'; }
@@ -158,11 +169,17 @@
   function modalityFit(contractor, gap) {
     const wanted = gapModality(gap);
     const mods = contractorModalities(contractor);
-    const school = findSchool(gap);
-    const miles = distanceMiles(contractorKey(contractor), schoolKey(school));
+    const isDistrictWide = gap.scope === 'district' || !gap.schoolId;
+    const school = isDistrictWide ? null : findSchool(gap);
+    const miles = isDistrictWide ? null : distanceMiles(contractorKey(contractor), schoolKey(school));
 
     const teleOk = mods.includes('tele');
-    const onsiteOk = mods.includes('onsite') && miles <= ONSITE_RADIUS_MILES;
+    // District-wide onsite gaps accept any onsite-capable contractor in the
+    // licensed state (state check happens upstream in eligibility). For
+    // school-tied onsite gaps the 100-mile rule applies.
+    const onsiteOk = mods.includes('onsite') && (
+      isDistrictWide || (Number.isFinite(miles) && miles <= ONSITE_RADIUS_MILES)
+    );
 
     if (wanted === 'tele')   return { ok: teleOk,             modality: 'tele',   miles };
     if (wanted === 'onsite') return { ok: onsiteOk,           modality: 'onsite', miles };
@@ -203,7 +220,7 @@
     const pri = { urgent: 100, high: 70, medium: 40, low: 10 };
     score += pri[g.priority] || 0;
     if (free > 0 && g.hours <= free) score += 50;
-    score += daysPosted(g.posted) * 2;
+    score += daysPosted(g) * 2;
     if (fit && fit.modality === 'onsite' && Number.isFinite(fit.miles)) {
       score += Math.max(0, ONSITE_RADIUS_MILES - fit.miles) * 0.3;
     }
@@ -231,23 +248,26 @@
   }
 
   function ScheduleWorkspace({ pal }) {
-    const gaps = window.RCIS_DATA.COVERAGE_GAPS;
+    const allGaps = window.useCoverageGaps ? window.useCoverageGaps() : [];
+    const gaps = React.useMemo(() => allGaps.filter((g) => g.status === 'open'), [allGaps]);
     const contractors = window.RCIS_DATA.CONTRACTORS;
 
     const [selectedGapId, setSelectedGapId] = React.useState(null);
     const [selectedContractorId, setSelectedContractorId] = React.useState(null);
     const [editorDraft, setEditorDraft] = React.useState(null);
-    const [rateOverrides, setRateOverrides] = React.useState(loadRateOverrides);
+    const [gapEditor, setGapEditor] = React.useState(null);
 
+    // Bill rate is stored on the gap record now; this setter writes directly
+    // to Supabase via GapsStore. localStorage overrides are no longer used.
     const setGapRate = (id, rate) => {
-      setRateOverrides((prev) => {
-        const next = { ...prev };
-        if (!Number.isFinite(rate) || rate <= 0) delete next[id];
-        else next[id] = rate;
-        saveRateOverrides(next);
-        return next;
-      });
+      const r = Number.isFinite(rate) && rate > 0 ? rate : null;
+      if (window.GapsStore) window.GapsStore.update(id, { billRate: r });
     };
+    const rateOverrides = React.useMemo(() => {
+      const out = {};
+      for (const g of allGaps) if (g.billRate != null) out[g.id] = g.billRate;
+      return out;
+    }, [allGaps]);
 
     const selectedGap = selectedGapId ? gaps.find((g) => g.id === selectedGapId) : null;
     const selectedContractor = selectedContractorId
@@ -388,6 +408,8 @@
             onChangeRate={setGapRate}
             onSelectGap={selectGap}
             onCreateTask={openTaskDraftFor}
+            onEditGap={(g) => setGapEditor({ isNew: false, gap: { ...g } })}
+            onLogGap={() => setGapEditor({ isNew: true, gap: {} })}
           />
           <ContractorsPanel
             pal={pal}
@@ -411,11 +433,33 @@
             onClose={closeEditor}
           />
         )}
+
+        {gapEditor && (
+          <window.GapEditor
+            gap={gapEditor.gap}
+            pal={pal}
+            isNew={gapEditor.isNew}
+            onSave={async (patch) => {
+              if (gapEditor.isNew) {
+                const { id, ...rest } = patch;
+                await window.GapsStore.add(rest);
+              } else {
+                await window.GapsStore.update(gapEditor.gap.id, patch);
+              }
+              setGapEditor(null);
+            }}
+            onDelete={async () => {
+              await window.GapsStore.remove(gapEditor.gap.id);
+              setGapEditor(null);
+            }}
+            onClose={() => setGapEditor(null)}
+          />
+        )}
       </div>
     );
   }
 
-  function GapsPanel({ pal, gaps, ranked, selectedGapId, selectedContractor, rateOverrides, onChangeRate, onSelectGap, onCreateTask }) {
+  function GapsPanel({ pal, gaps, ranked, selectedGapId, selectedContractor, rateOverrides, onChangeRate, onSelectGap, onCreateTask, onEditGap, onLogGap }) {
     const items = ranked ? ranked : gaps.map((g) => ({ g, fit: null }));
     const isRanked = !!ranked;
     const totalWeekly = (isRanked ? items.map((r) => r.g) : gaps)
@@ -424,10 +468,19 @@
       ? ` · ${fmtMoney(totalWeekly)}/wk potential`
       : '';
     return (
-      <Panel pal={pal} title={isRanked ? `Best gaps for ${selectedContractor.name}` : 'Coverage gaps'}
+      <Panel pal={pal}
+             title={isRanked ? `Best gaps for ${selectedContractor.name}` : 'Coverage gaps'}
              subtitle={(isRanked
                ? `${items.length} match${items.length === 1 ? '' : 'es'} · same specialty + state, modality OK`
-               : `${gaps.length} open`) + moneySuffix}>
+               : `${gaps.length} open`) + moneySuffix}
+             action={!isRanked && onLogGap && (
+               <button onClick={onLogGap} style={{
+                 background: 'transparent', border: 'none',
+                 color: pal.accent, fontSize: 12.5, fontWeight: 600,
+                 cursor: 'pointer', fontFamily: 'inherit',
+                 display: 'inline-flex', alignItems: 'center', gap: 4,
+               }}>+ Log gap</button>
+             )}>
         {items.length === 0 ? (
           <Empty pal={pal} text={isRanked
             ? 'No open gaps match this contractor on specialty, state, and modality.'
@@ -446,6 +499,7 @@
                 rankAction={isRanked
                   ? () => onCreateTask(g, selectedContractor)
                   : null}
+                onEdit={onEditGap ? () => onEditGap(g) : null}
                 onClick={() => onSelectGap(g.id)}
               />
             ))}
@@ -550,7 +604,7 @@
     );
   }
 
-  function Panel({ pal, title, subtitle, children }) {
+  function Panel({ pal, title, subtitle, action, children }) {
     return (
       <div style={{
         background: pal.card,
@@ -561,20 +615,28 @@
         flexDirection: 'column',
         gap: 10,
       }}>
-        <div>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: pal.text, letterSpacing: -0.1 }}>{title}</div>
-          {subtitle && (
-            <div style={{ fontSize: 11.5, color: pal.textFaint, marginTop: 2 }}>{subtitle}</div>
-          )}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: pal.text, letterSpacing: -0.1 }}>{title}</div>
+            {subtitle && (
+              <div style={{ fontSize: 11.5, color: pal.textFaint, marginTop: 2 }}>{subtitle}</div>
+            )}
+          </div>
+          {action && <div>{action}</div>}
         </div>
         {children}
       </div>
     );
   }
 
-  function GapRow({ pal, gap, fit, rate, onChangeRate, selected, rankAction, onClick }) {
+  function GapRow({ pal, gap, fit, rate, onChangeRate, selected, rankAction, onClick, onEdit }) {
     const wanted = gapModality(gap);
     const weekly = Math.round(gap.hours * rate);
+    const isDistrictWide = gap.scope === 'district' || !gap.schoolId;
+    const displayName = isDistrictWide
+      ? `${gap.districtName} (district-wide)`
+      : (gap.schoolName || gap.districtName);
+    const districtState = gap.districtName ? `${gap.districtName} · ${gap.state}` : gap.state;
     return (
       <button
         onClick={onClick}
@@ -596,20 +658,20 @@
         <PrioDot prio={gap.priority} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12.8, fontWeight: 600, color: pal.text, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {gap.school}
+            {displayName}
           </div>
           <div style={{ fontSize: 11, color: pal.textFaint, marginTop: 2, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span>{gap.district} · {gap.state}</span>
+            <span>{districtState}</span>
             <span style={{ color: pal.textSoft, fontWeight: 600 }}>{gap.hours}h/wk</span>
             <ModalityChip pal={pal} modality={wanted} />
             {fit && (
               <span style={{ color: pal.accent, fontWeight: 700 }}>
-                via {fit.modality === 'onsite' && Number.isFinite(fit.miles)
-                  ? `onsite · ${Math.round(fit.miles)} mi`
+                via {fit.modality === 'onsite'
+                  ? (Number.isFinite(fit.miles) ? `onsite · ${Math.round(fit.miles)} mi` : 'onsite · district')
                   : 'tele'}
               </span>
             )}
-            <span>{PRIORITY_LABEL[gap.priority] || gap.priority} · posted {gap.posted}</span>
+            <span>{PRIORITY_LABEL[gap.priority] || gap.priority} · posted {postedLabel(gap)}</span>
           </div>
         </div>
         <div style={{
@@ -626,6 +688,21 @@
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <SpecChip code={gap.spec} />
+          {onEdit && (
+            <button onClick={(e) => { e.stopPropagation(); onEdit(); }}
+              title="Edit coverage gap"
+              style={{
+                width: 26, height: 26, padding: 0,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                background: 'transparent', color: pal.textFaint,
+                border: `1px solid ${pal.border}`, borderRadius: 6,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = pal.text; e.currentTarget.style.borderColor = pal.textFaint; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = pal.textFaint; e.currentTarget.style.borderColor = pal.border; }}>
+              <Icon name="settings" size={12} stroke={1.8} />
+            </button>
+          )}
           {rankAction && (
             <CreateTaskButton pal={pal} onClick={(e) => { e.stopPropagation(); rankAction(); }} />
           )}
