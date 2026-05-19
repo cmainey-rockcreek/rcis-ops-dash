@@ -55,7 +55,6 @@
   <script type="text/babel" src="notes-section.jsx"></script>
   <script type="text/babel" src="dashboard-calm.jsx"></script>
   <script type="text/babel" src="page-tasks.jsx"></script>
-  <script type="text/babel" src="page-completed.jsx"></script>
   <script type="text/babel" src="page-contractors.jsx"></script>
   <script type="text/babel" src="page-schools.jsx"></script>
   <script type="text/babel" src="page-districts.jsx"></script>
@@ -124,8 +123,6 @@
         page = <ContactsPage dark={t.dark} />;
       } else if (route.name === 'board') {
         page = <TasksPage dark={t.dark} />;
-      } else if (route.name === 'completed') {
-        page = <CompletedPage dark={t.dark} />;
       } else {
         page = <DashboardCalm dark={t.dark} widgets={widgets} />;
       }

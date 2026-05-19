@@ -170,7 +170,7 @@
       { key: 'done',      title: 'Done',            tint: '#3E8A57',     accent: '#3E8A57' },
     ];
 
-    const DONE_VISIBLE = 10;
+    const RECENT_DONE_DAYS = 5;
     const byColumn = React.useMemo(() => {
       const out = { todo: [], doing: [], attention: [], done: [] };
       for (const t of todos) if (out[t.column]) out[t.column].push(t);
@@ -178,7 +178,10 @@
       return out;
     }, [todos]);
     const doneTotal = byColumn.done.length;
-    const doneVisible = React.useMemo(() => byColumn.done.slice(0, DONE_VISIBLE), [byColumn.done]);
+    const doneVisible = React.useMemo(() => {
+      const cutoff = Date.now() - RECENT_DONE_DAYS * 24 * 60 * 60 * 1000;
+      return byColumn.done.filter((t) => (t.completedAt || t.updatedAt || 0) >= cutoff);
+    }, [byColumn.done]);
 
     const openNew = (column) => {
       const current = window.TeamStore && window.TeamStore.current();
@@ -310,12 +313,12 @@
                       }}>Drop here or + add</div>
                     )}
                     {col.key === 'done' && hiddenDone > 0 && (
-                      <window.Link to="/completed" style={{
+                      <window.Link to="/board" style={{
                         display: 'block', padding: '6px 8px',
                         textAlign: 'center', fontSize: 11, fontWeight: 600,
                         color: pal.textSoft, textDecoration: 'none',
                         border: `1px dashed ${pal.border}`, borderRadius: 6,
-                      }}>View {hiddenDone} more in archive →</window.Link>
+                      }}>View {hiddenDone} more in Tasks →</window.Link>
                     )}
                   </div>
                 </div>

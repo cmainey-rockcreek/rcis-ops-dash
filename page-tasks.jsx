@@ -19,6 +19,10 @@
     label: 'all',
     due: 'all',
   };
+  // Done tasks completed within this many days stay visible under the default
+  // "Open" filter so the team can see recent wins at a glance. Older ones
+  // archive and only surface when status is set to Done or All.
+  const RECENT_DONE_DAYS = 5;
 
   function TasksPage({ dark = false }) {
     return (
@@ -367,15 +371,6 @@
           <span style={{ width: 8, height: 8, borderRadius: 4, background: meta.color }} />
           <span style={{ fontSize: 11, fontWeight: 800, color: pal.textSoft, textTransform: 'uppercase', letterSpacing: 0.6 }}>{meta.label}</span>
           <span style={{ marginLeft: 'auto', fontSize: 11, color: pal.textFaint, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{items.length}</span>
-          {column === 'done' && (
-            <window.Link to="/completed" title="View completed archive" style={{
-              fontSize: 10.5,
-              color: pal.textSoft,
-              textDecoration: 'none',
-              fontWeight: 600,
-              padding: '0 4px',
-            }}>archive →</window.Link>
-          )}
           <button onClick={onAdd} title={`Add to ${meta.label}`} style={{
             display: 'flex',
             alignItems: 'center',
@@ -617,7 +612,11 @@
   }
 
   function matchesFilters(todo, filters) {
-    if (filters.status === 'open' && todo.column === 'done') return false;
+    if (filters.status === 'open' && todo.column === 'done') {
+      const when = todo.completedAt || todo.updatedAt || 0;
+      const cutoff = Date.now() - RECENT_DONE_DAYS * 24 * 60 * 60 * 1000;
+      if (when < cutoff) return false;
+    }
     if (filters.status !== 'all' && filters.status !== 'open' && todo.column !== filters.status) return false;
     if (filters.owner === 'unassigned' && todo.owners.length > 0) return false;
     if (filters.owner !== 'all' && filters.owner !== 'unassigned' && !todo.owners.includes(filters.owner)) return false;

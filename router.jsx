@@ -33,7 +33,6 @@
       return { name: 'school', segs, id: segs[1] };
     }
     if (segs[0] === 'board')     return { name: 'board', segs };
-    if (segs[0] === 'completed') return { name: 'completed', segs };
     return { name: 'dashboard', segs: [] };
   }
 
