@@ -519,39 +519,114 @@
 
   // ─── Renewals ─────────────────────────────────────────────────────────────
   function Renewals({ pal }) {
-    return (
-      <Card pal={pal} title="Upcoming renewals" count={5} action="Calendar →">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {window.RCIS_DATA.RENEWALS.map((r, i) => {
-            const urgent = r.days <= 7;
-            return (
-              <div key={r.id} style={{
-                display: 'grid', gridTemplateColumns: '60px 1fr auto auto',
-                gap: 10, alignItems: 'center',
-                padding: '8px 4px',
-                borderBottom: i < 4 ? `1px solid ${pal.borderSoft}` : 'none',
-              }}>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
-                  textTransform: 'uppercase',
-                  color: pal.textSoft,
-                  background: pal.chipBg,
-                  padding: '3px 6px', borderRadius: 4, textAlign: 'center',
-                }}>{r.kind}</span>
-                <div style={{ fontSize: 12.5, color: pal.text, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.what}</div>
-                <OwnerAvatar id={r.owner} size={18} />
-                <span style={{
-                  fontSize: 11, fontWeight: 600,
-                  color: urgent ? pal.warn : pal.textSoft,
-                  fontVariantNumeric: 'tabular-nums',
-                  width: 56, textAlign: 'right',
-                }}>{r.days}d</span>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+    const all = window.useRenewals ? window.useRenewals() : [];
+    const open = React.useMemo(
+      () => all.filter((r) => r.status !== 'lapsed').sort((a, b) => {
+        const ax = a.expiresOn || '9999-12-31';
+        const bx = b.expiresOn || '9999-12-31';
+        return ax.localeCompare(bx);
+      }),
+      [all],
     );
+    const rows = open.slice(0, 5);
+    const [editor, setEditor] = React.useState(null);
+
+    const openNew  = () => setEditor({ isNew: true,  renewal: {} });
+    const openEdit = (r) => setEditor({ isNew: false, renewal: { ...r } });
+    const close    = () => setEditor(null);
+    const save = async (patch) => {
+      if (editor.isNew) {
+        const { id, ...rest } = patch;
+        await window.RenewalsStore.add(rest);
+      } else {
+        await window.RenewalsStore.update(editor.renewal.id, patch);
+      }
+      close();
+    };
+    const del = async () => {
+      await window.RenewalsStore.remove(editor.renewal.id);
+      close();
+    };
+
+    return (
+      <>
+        <Card pal={pal} title="Upcoming renewals" count={open.length}
+              action={(
+                <button onClick={openNew} style={{
+                  background: 'transparent', border: 'none',
+                  color: pal.accent, fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}>+ Log renewal</button>
+              )}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {rows.length === 0 && (
+              <div style={{ padding: '14px 4px', fontSize: 12, color: pal.textFaint }}>
+                Nothing tracked yet. Log a license, policy, or contract to get started.
+              </div>
+            )}
+            {rows.map((r, i) => {
+              const kindMeta = window.renewalKindMeta ? window.renewalKindMeta(r.kind) : { color: pal.textSoft };
+              const days = window.daysUntilRenewal(r.expiresOn);
+              const urgency = window.renewalUrgency(r.expiresOn);
+              const urgentColor = urgency === 'overdue' ? '#E76B5D'
+                                : urgency === 'soon'    ? '#C98A2C'
+                                : pal.textSoft;
+              const owner = r.contractorName || r.schoolName || r.districtName || '—';
+              const label = r.label
+                ? `${owner} · ${r.label}${r.state ? ` (${r.state})` : ''}`
+                : owner;
+              const daysLabel = days == null ? '—'
+                              : days < 0    ? `${Math.abs(days)}d over`
+                              : days === 0  ? 'today'
+                              : `${days}d`;
+              return (
+                <button key={r.id} onClick={() => openEdit(r)} style={{
+                  display: 'grid',
+                  gridTemplateColumns: '70px 1fr auto',
+                  gap: 10, alignItems: 'center',
+                  padding: '8px 4px',
+                  borderBottom: i < rows.length - 1 ? `1px solid ${pal.borderSoft}` : 'none',
+                  background: 'transparent', border: 'none', width: '100%',
+                  textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
+                    textTransform: 'uppercase',
+                    color: kindMeta.color,
+                    background: kindMeta.color + '18',
+                    padding: '3px 6px', borderRadius: 4, textAlign: 'center',
+                  }}>{shortRenewalKind(r.kind)}</span>
+                  <div style={{ fontSize: 12.5, color: pal.text, fontWeight: 500,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+                  <span style={{
+                    fontSize: 11, fontWeight: 600,
+                    color: urgentColor,
+                    fontVariantNumeric: 'tabular-nums',
+                    width: 60, textAlign: 'right',
+                  }}>{daysLabel}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+        {editor && (
+          <window.RenewalEditor
+            renewal={editor.renewal}
+            pal={pal}
+            isNew={editor.isNew}
+            onSave={save}
+            onDelete={del}
+            onClose={close}
+          />
+        )}
+      </>
+    );
+  }
+  function shortRenewalKind(k) {
+    if (k === 'contractor_license')   return 'License';
+    if (k === 'contractor_insurance') return 'Insurance';
+    if (k === 'client_contract')      return 'Contract';
+    return k;
   }
 
   // ─── Pinned notes ─────────────────────────────────────────────────────────

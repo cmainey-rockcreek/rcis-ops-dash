@@ -52,6 +52,8 @@
   <script src="contacts-store.js"></script>
   <script src="documents-store.js"></script>
   <script src="notes-store.js"></script>
+  <script src="renewals-store.js"></script>
+  <script type="text/babel" src="renewal-editor.jsx"></script>
   <script type="text/babel" src="shell-calm.jsx"></script>
   <script type="text/babel" src="contacts-section.jsx"></script>
   <script type="text/babel" src="documents-section.jsx"></script>
@@ -63,6 +65,7 @@
   <script type="text/babel" src="page-schools.jsx"></script>
   <script type="text/babel" src="page-districts.jsx"></script>
   <script type="text/babel" src="page-contacts.jsx"></script>
+  <script type="text/babel" src="page-renewals.jsx"></script>
 
   <script type="text/babel">
     const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -129,6 +132,8 @@
         page = <TasksPage dark={t.dark} />;
       } else if (route.name === 'matchmaker') {
         page = <SchedulePage dark={t.dark} />;
+      } else if (route.name === 'renewals') {
+        page = <RenewalsPage dark={t.dark} />;
       } else {
         page = <DashboardCalm dark={t.dark} widgets={widgets} />;
       }

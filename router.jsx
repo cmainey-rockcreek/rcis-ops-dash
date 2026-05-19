@@ -34,6 +34,7 @@
     }
     if (segs[0] === 'board')     return { name: 'board', segs };
     if (segs[0] === 'matchmaker') return { name: 'matchmaker', segs };
+    if (segs[0] === 'renewals')  return { name: 'renewals', segs };
     return { name: 'home', segs: [] };
   }
 

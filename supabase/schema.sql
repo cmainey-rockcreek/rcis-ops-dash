@@ -79,6 +79,37 @@ create table if not exists public.gap_comments (
 create index if not exists gap_comments_gap_idx    on public.gap_comments (gap_id, created_at);
 create index if not exists gap_comments_author_idx on public.gap_comments (author_id);
 
+-- ─── renewals ────────────────────────────────────────────────────────────
+-- Time-bound items that expire and need to be re-upped. Kinds:
+--   contractor_license   → state board license per contractor (state required)
+--   contractor_insurance → liability policy on a contractor
+--   client_contract      → service contract on a school or district
+-- Owner is exactly one of contractor_id, school_id, district_id (enforced in app).
+create table if not exists public.renewals (
+  id             text primary key,
+  kind           text not null check (kind in ('contractor_license','contractor_insurance','client_contract')),
+  contractor_id  text,
+  contractor_name text,
+  school_id      text,
+  school_name    text,
+  district_id    text,
+  district_name  text,
+  label          text not null default '',
+  state          text,
+  expires_on     date not null,
+  status         text not null default 'active' check (status in ('active','pending','lapsed')),
+  note           text default '',
+  attachments    jsonb not null default '[]',
+  created_by     uuid references public.team_profiles(id) on delete set null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+create index if not exists renewals_kind_idx        on public.renewals (kind, status);
+create index if not exists renewals_expires_idx     on public.renewals (expires_on);
+create index if not exists renewals_contractor_idx  on public.renewals (contractor_id) where contractor_id is not null;
+create index if not exists renewals_school_idx      on public.renewals (school_id)     where school_id is not null;
+create index if not exists renewals_district_idx    on public.renewals (district_id)   where district_id is not null;
+
 -- ─── task_comments ───────────────────────────────────────────────────────
 -- Free-text discussion thread on a todo. Author resolves via team_profiles.
 create table if not exists public.task_comments (
@@ -143,6 +174,10 @@ create trigger touch_todos before update on public.todos
 
 drop trigger if exists touch_coverage_gaps on public.coverage_gaps;
 create trigger touch_coverage_gaps before update on public.coverage_gaps
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_renewals on public.renewals;
+create trigger touch_renewals before update on public.renewals
   for each row execute function public.touch_updated_at();
 
 drop trigger if exists touch_team_profiles on public.team_profiles;
@@ -236,6 +271,7 @@ alter table public.todos          enable row level security;
 alter table public.task_comments  enable row level security;
 alter table public.coverage_gaps  enable row level security;
 alter table public.gap_comments   enable row level security;
+alter table public.renewals       enable row level security;
 alter table public.team_profiles enable row level security;
 alter table public.contacts      enable row level security;
 alter table public.documents     enable row level security;
@@ -261,6 +297,10 @@ create policy "team can delete own task comments"
 
 drop policy if exists "team full access" on public.coverage_gaps;
 create policy "team full access" on public.coverage_gaps
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "team full access" on public.renewals;
+create policy "team full access" on public.renewals
   for all to authenticated using (true) with check (true);
 
 drop policy if exists "team can read gap comments" on public.gap_comments;
@@ -313,6 +353,10 @@ exception when duplicate_object then null;
 end $$;
 do $$ begin
   alter publication supabase_realtime add table public.coverage_gaps;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.renewals;
 exception when duplicate_object then null;
 end $$;
 do $$ begin

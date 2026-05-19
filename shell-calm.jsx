@@ -137,6 +137,18 @@
   // ─── Sidebar ──────────────────────────────────────────────────────────────
   function CalmSidebar({ pal, activePage }) {
     const { SPECIALTIES, DISTRICTS } = window.RCIS_DATA;
+    // Subscribe to renewals so the sidebar badge updates live with the store.
+    const renewals = window.useRenewals ? window.useRenewals() : [];
+    const renewalsBadge = React.useMemo(() => {
+      if (!renewals.length) return null;
+      const n = renewals.filter((r) => {
+        if (r.status === 'lapsed') return false;
+        const u = window.renewalUrgency && window.renewalUrgency(r.expiresOn);
+        return u === 'overdue' || u === 'soon' || u === 'upcoming';
+      }).length;
+      return n > 0 ? String(n) : null;
+    }, [renewals]);
+
     const NAV = [
       { key: 'home',        icon: 'grid',   name: 'Home',         to: '/' },
       { key: 'contractors', icon: 'user',   name: 'Contractors',  to: '/contractors', badge: window.RCIS_DATA.CONTRACTORS.length.toString() },
@@ -144,7 +156,7 @@
       { key: 'districts',   icon: 'flag',   name: 'Districts',    to: '/districts',   badge: window.RCIS_DATA.DISTRICTS.length.toString() },
       { key: 'matchmaker',  icon: 'cal',    name: 'Matchmaker',   to: '/matchmaker' },
       { key: 'board',       icon: 'list',   name: 'Tasks',        to: '/board' },
-      { key: 'renewals',    icon: 'file',   name: 'Renewals',     to: '/renewals',    badge: '5' },
+      { key: 'renewals',    icon: 'file',   name: 'Renewals',     to: '/renewals',    badge: renewalsBadge },
     ];
     return (
       <div style={{
