@@ -128,6 +128,7 @@
       { key: 'districts',   icon: 'flag',   name: 'Districts',    to: '/districts',   badge: window.RCIS_DATA.DISTRICTS.length.toString() },
       { key: 'assignments', icon: 'cal',    name: 'Assignments',  to: '/assignments' },
       { key: 'board',       icon: 'list',   name: 'Tasks',        to: '/board' },
+      { key: 'completed',   icon: 'check',  name: 'Completed',    to: '/completed' },
       { key: 'renewals',    icon: 'file',   name: 'Renewals',     to: '/renewals',    badge: '5' },
     ];
     return (

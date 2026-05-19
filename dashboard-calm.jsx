@@ -170,12 +170,15 @@
       { key: 'done',      title: 'Done',            tint: '#3E8A57',     accent: '#3E8A57' },
     ];
 
+    const DONE_VISIBLE = 10;
     const byColumn = React.useMemo(() => {
       const out = { todo: [], doing: [], attention: [], done: [] };
       for (const t of todos) if (out[t.column]) out[t.column].push(t);
       for (const k of Object.keys(out)) out[k].sort((a, b) => b.updatedAt - a.updatedAt);
       return out;
     }, [todos]);
+    const doneTotal = byColumn.done.length;
+    const doneVisible = React.useMemo(() => byColumn.done.slice(0, DONE_VISIBLE), [byColumn.done]);
 
     const openNew = (column) => {
       const current = window.TeamStore && window.TeamStore.current();
@@ -259,7 +262,8 @@
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, minHeight: 0 }}>
             {cols.map(col => {
-              const items = byColumn[col.key];
+              const items = col.key === 'done' ? doneVisible : byColumn[col.key];
+              const hiddenDone = col.key === 'done' ? Math.max(0, doneTotal - items.length) : 0;
               const isOver = dragOver === col.key;
               return (
                 <div key={col.key}
@@ -278,7 +282,7 @@
                     <span style={{ width: 7, height: 7, borderRadius: 4, background: col.tint }} />
                     <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6,
                       textTransform: 'uppercase', color: pal.textSoft }}>{col.title}</span>
-                    <span style={{ fontSize: 11, color: pal.textFaint, fontVariantNumeric: 'tabular-nums', marginLeft: 'auto' }}>{items.length}</span>
+                    <span style={{ fontSize: 11, color: pal.textFaint, fontVariantNumeric: 'tabular-nums', marginLeft: 'auto' }}>{col.key === 'done' ? doneTotal : items.length}</span>
                     <button onClick={() => openNew(col.key)} title="Add to this column"
                       style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -304,6 +308,14 @@
                         fontSize: 11, color: pal.textFaint,
                         border: `1px dashed ${pal.border}`, borderRadius: 6,
                       }}>Drop here or + add</div>
+                    )}
+                    {col.key === 'done' && hiddenDone > 0 && (
+                      <window.Link to="/completed" style={{
+                        display: 'block', padding: '6px 8px',
+                        textAlign: 'center', fontSize: 11, fontWeight: 600,
+                        color: pal.textSoft, textDecoration: 'none',
+                        border: `1px dashed ${pal.border}`, borderRadius: 6,
+                      }}>View {hiddenDone} more in archive →</window.Link>
                     )}
                   </div>
                 </div>

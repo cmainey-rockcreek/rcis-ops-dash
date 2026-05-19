@@ -367,6 +367,15 @@
           <span style={{ width: 8, height: 8, borderRadius: 4, background: meta.color }} />
           <span style={{ fontSize: 11, fontWeight: 800, color: pal.textSoft, textTransform: 'uppercase', letterSpacing: 0.6 }}>{meta.label}</span>
           <span style={{ marginLeft: 'auto', fontSize: 11, color: pal.textFaint, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{items.length}</span>
+          {column === 'done' && (
+            <window.Link to="/completed" title="View completed archive" style={{
+              fontSize: 10.5,
+              color: pal.textSoft,
+              textDecoration: 'none',
+              fontWeight: 600,
+              padding: '0 4px',
+            }}>archive →</window.Link>
+          )}
           <button onClick={onAdd} title={`Add to ${meta.label}`} style={{
             display: 'flex',
             alignItems: 'center',
