@@ -8,6 +8,7 @@
   const STATUS = {
     todo: { label: 'To do', color: '#7A8290' },
     doing: { label: 'Doing', color: '#2BBFB5' },
+    attention: { label: 'Needs attention', color: '#C98A2C' },
     done: { label: 'Done', color: '#3E8A57' },
   };
   const DEFAULT_FILTERS = {
@@ -41,7 +42,7 @@
 
     const counts = React.useMemo(() => summarize(todos), [todos]);
     const byColumn = React.useMemo(() => {
-      const out = { todo: [], doing: [], done: [] };
+      const out = { todo: [], doing: [], attention: [], done: [] };
       for (const t of filtered) {
         if (out[t.column]) out[t.column].push(t);
       }
@@ -168,8 +169,8 @@
             gap: 12,
             minHeight: 560,
           }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, minHeight: 0 }}>
-              {['todo', 'doing', 'done'].map((column) => (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, minHeight: 0 }}>
+              {['todo', 'doing', 'attention', 'done'].map((column) => (
                 <TaskColumn
                   key={column}
                   column={column}
@@ -228,6 +229,9 @@
   }
 
   function Filters({ pal, team, filters, setFilter, clearFilters }) {
+    const currentUser = window.TeamStore && window.TeamStore.current && window.TeamStore.current();
+    const myActive = !!(currentUser && filters.owner === currentUser.id);
+
     const inputStyle = {
       height: 34,
       padding: '0 10px',
@@ -243,15 +247,46 @@
 
     return (
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1.7fr .9fr .9fr .9fr 1fr .9fr auto',
+        display: 'flex',
+        flexDirection: 'column',
         gap: 8,
-        alignItems: 'center',
         background: pal.card,
         border: `1px solid ${pal.border}`,
         borderRadius: 10,
         padding: 10,
       }}>
+        {currentUser && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              onClick={() => setFilter('owner', myActive ? 'all' : currentUser.id)}
+              title={myActive ? 'Showing only your tasks. Click to clear.' : 'Show only tasks assigned to you.'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                height: 26,
+                padding: '0 10px 0 4px',
+                background: myActive ? pal.accent : 'transparent',
+                color: myActive ? '#fff' : pal.textSoft,
+                border: `1px solid ${myActive ? pal.accent : pal.border}`,
+                borderRadius: 14,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              <OwnerAvatar id={currentUser.id} size={18} ring={myActive ? pal.accent : pal.card} />
+              My tasks
+            </button>
+          </div>
+        )}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1.7fr .9fr .9fr .9fr 1fr .9fr auto',
+          gap: 8,
+          alignItems: 'center',
+        }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 10px', background: pal.cardAlt, border: `1px solid ${pal.border}`, borderRadius: 7 }}>
           <Icon name="search" size={14} color={pal.textFaint} />
           <input
@@ -271,6 +306,7 @@
           <option value="all">All status</option>
           <option value="todo">To do</option>
           <option value="doing">Doing</option>
+          <option value="attention">Needs attention</option>
           <option value="done">Done</option>
         </select>
         <select style={inputStyle} value={filters.priority} onChange={(e) => setFilter('priority', e.target.value)}>
@@ -303,6 +339,7 @@
           fontFamily: 'inherit',
           whiteSpace: 'nowrap',
         }}>Reset</button>
+        </div>
       </div>
     );
   }
@@ -453,10 +490,14 @@
   }
 
   function FocusPanel({ pal, team, todos, onOpen }) {
-    const dueNow = React.useMemo(() => todos
-      .filter((t) => t.column !== 'done' && (isOverdue(t.due) || isToday(t.due)))
+    const overdue = React.useMemo(() => todos
+      .filter((t) => t.column !== 'done' && isOverdue(t.due))
       .sort(sortTasks)
-      .slice(0, 8), [todos]);
+      .slice(0, 6), [todos]);
+    const dueToday = React.useMemo(() => todos
+      .filter((t) => t.column !== 'done' && isToday(t.due))
+      .sort(sortTasks)
+      .slice(0, 6), [todos]);
     const unassigned = React.useMemo(() => todos
       .filter((t) => t.column !== 'done' && (!t.owners || t.owners.length === 0))
       .sort(sortTasks)
@@ -482,8 +523,12 @@
           </div>
         </SideCard>
 
-        <SideCard pal={pal} title="Needs attention" count={dueNow.length}>
-          <MiniList pal={pal} todos={dueNow} onOpen={onOpen} empty="Nothing overdue or due today." />
+        <SideCard pal={pal} title="Overdue" count={overdue.length}>
+          <MiniList pal={pal} todos={overdue} onOpen={onOpen} empty="Nothing overdue." />
+        </SideCard>
+
+        <SideCard pal={pal} title="Due today" count={dueToday.length}>
+          <MiniList pal={pal} todos={dueToday} onOpen={onOpen} empty="Nothing due today." />
         </SideCard>
 
         <SideCard pal={pal} title="Unassigned" count={unassigned.length}>

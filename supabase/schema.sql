@@ -6,7 +6,7 @@
 create table if not exists public.todos (
   id            text primary key,
   title         text not null,
-  column_name   text not null default 'todo' check (column_name in ('todo','doing','done')),
+  column_name   text not null default 'todo' check (column_name in ('todo','doing','attention','done')),
   owners        text[] not null default '{}',
   label         text not null default 'Ops',
   priority      text not null default 'medium' check (priority in ('high','medium','low')),

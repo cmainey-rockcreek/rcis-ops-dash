@@ -164,13 +164,14 @@
     const [dragOver, setDragOver] = React.useState(null);
 
     const cols = [
-      { key: 'todo',  title: 'To do',  tint: pal.textFaint, accent: pal.textFaint },
-      { key: 'doing', title: 'Doing',  tint: pal.accent,    accent: pal.accent },
-      { key: 'done',  title: 'Done',   tint: '#3E8A57',     accent: '#3E8A57' },
+      { key: 'todo',      title: 'To do',           tint: pal.textFaint, accent: pal.textFaint },
+      { key: 'doing',     title: 'Doing',           tint: pal.accent,    accent: pal.accent },
+      { key: 'attention', title: 'Needs attention', tint: '#C98A2C',     accent: '#C98A2C' },
+      { key: 'done',      title: 'Done',            tint: '#3E8A57',     accent: '#3E8A57' },
     ];
 
     const byColumn = React.useMemo(() => {
-      const out = { todo: [], doing: [], done: [] };
+      const out = { todo: [], doing: [], attention: [], done: [] };
       for (const t of todos) if (out[t.column]) out[t.column].push(t);
       for (const k of Object.keys(out)) out[k].sort((a, b) => b.updatedAt - a.updatedAt);
       return out;
@@ -256,7 +257,7 @@
               </button>
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, minHeight: 0 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, minHeight: 0 }}>
             {cols.map(col => {
               const items = byColumn[col.key];
               const isOver = dragOver === col.key;
