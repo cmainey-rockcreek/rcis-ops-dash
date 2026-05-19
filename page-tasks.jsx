@@ -6,7 +6,7 @@
 
   const PRIO = { high: '#D97757', medium: '#C98A2C', low: '#7A8290' };
   const STATUS = {
-    todo: { label: 'To do', color: '#7A8290' },
+    todo: { label: 'To Do', color: '#7A8290' },
     doing: { label: 'Doing', color: '#2BBFB5' },
     attention: { label: 'Needs attention', color: '#C98A2C' },
     done: { label: 'Done', color: '#3E8A57' },
@@ -304,7 +304,7 @@
         <select style={inputStyle} value={filters.status} onChange={(e) => setFilter('status', e.target.value)}>
           <option value="open">Open</option>
           <option value="all">All status</option>
-          <option value="todo">To do</option>
+          <option value="todo">To Do</option>
           <option value="doing">Doing</option>
           <option value="attention">Needs attention</option>
           <option value="done">Done</option>

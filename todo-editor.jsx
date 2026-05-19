@@ -146,6 +146,18 @@
     });
     const [linkOpen, setLinkOpen] = React.useState(false);
     const [linkQuery, setLinkQuery] = React.useState('');
+    const linkBoxRef = React.useRef(null);
+
+    React.useEffect(() => {
+      if (!linkOpen) return;
+      const onMouseDown = (e) => {
+        if (linkBoxRef.current && !linkBoxRef.current.contains(e.target)) {
+          setLinkOpen(false);
+        }
+      };
+      document.addEventListener('mousedown', onMouseDown);
+      return () => document.removeEventListener('mousedown', onMouseDown);
+    }, [linkOpen]);
     const titleRef = React.useRef(null);
 
     React.useEffect(() => {
@@ -251,9 +263,15 @@
       pillRow: { display: 'flex', gap: 6 },
       pill: (on, color) => ({
         flex: 1,
-        padding: '7px 10px',
+        minHeight: 34,
+        padding: '6px 10px',
         fontSize: 12.5, fontWeight: 600,
+        lineHeight: 1.2,
         textAlign: 'center',
+        whiteSpace: 'nowrap',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         borderRadius: 7,
         border: `1px solid ${on ? color : pal.border}`,
         background: on ? color + '18' : 'transparent',
@@ -301,7 +319,8 @@
     };
 
     const PRIO_COLORS = { high: '#D97757', medium: '#C98A2C', low: '#7A8290' };
-    const COL_NAMES = { todo: 'To do', doing: 'Doing', done: 'Done' };
+    const COL_NAMES = { todo: 'To Do', doing: 'Doing', attention: 'Attention', done: 'Done' };
+    const COL_TINT = (c, pal) => c === 'done' ? '#3E8A57' : c === 'doing' ? pal.accent : c === 'attention' ? '#C98A2C' : pal.textSoft;
 
     return (
       <div style={styles.backdrop} onClick={onClose}>
@@ -334,8 +353,8 @@
               <div>
                 <div style={styles.label}>Status</div>
                 <div style={styles.pillRow}>
-                  {['todo', 'doing', 'done'].map((c) => (
-                    <div key={c} style={styles.pill(draft.column === c, c === 'done' ? '#3E8A57' : c === 'doing' ? pal.accent : pal.textSoft)}
+                  {['todo', 'doing', 'attention', 'done'].map((c) => (
+                    <div key={c} style={styles.pill(draft.column === c, COL_TINT(c, pal))}
                          onClick={() => set({ column: c })}>{COL_NAMES[c]}</div>
                   ))}
                 </div>
@@ -409,13 +428,14 @@
                           style={{ ...styles.btnSecondary, padding: '4px 9px', fontSize: 11.5 }}>Remove</button>
                 </div>
               ) : (
-                <div>
+                <div ref={linkBoxRef}>
                   <input
                     style={styles.input}
                     placeholder="Search a contractor, school, or district…"
                     value={linkQuery}
                     onChange={(e) => { setLinkQuery(e.target.value); setLinkOpen(true); }}
                     onFocus={() => setLinkOpen(true)}
+                    onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setLinkOpen(false); } }}
                   />
                   {linkOpen && (
                     <div style={{

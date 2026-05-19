@@ -164,7 +164,7 @@
     const [dragOver, setDragOver] = React.useState(null);
 
     const cols = [
-      { key: 'todo',      title: 'To do',           tint: pal.textFaint, accent: pal.textFaint },
+      { key: 'todo',      title: 'To Do',           tint: pal.textFaint, accent: pal.textFaint },
       { key: 'doing',     title: 'Doing',           tint: pal.accent,    accent: pal.accent },
       { key: 'attention', title: 'Needs attention', tint: '#C98A2C',     accent: '#C98A2C' },
       { key: 'done',      title: 'Done',            tint: '#3E8A57',     accent: '#3E8A57' },
