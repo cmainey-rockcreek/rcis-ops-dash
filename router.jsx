@@ -33,7 +33,7 @@
       return { name: 'school', segs, id: segs[1] };
     }
     if (segs[0] === 'board')     return { name: 'board', segs };
-    if (segs[0] === 'schedule')  return { name: 'schedule', segs };
+    if (segs[0] === 'matchmaker') return { name: 'matchmaker', segs };
     return { name: 'dashboard', segs: [] };
   }
 

@@ -142,7 +142,7 @@
       { key: 'contractors', icon: 'user',   name: 'Contractors',  to: '/contractors', badge: window.RCIS_DATA.CONTRACTORS.length.toString() },
       { key: 'contacts',    icon: 'user',   name: 'Contacts',     to: '/contacts' },
       { key: 'districts',   icon: 'flag',   name: 'Districts',    to: '/districts',   badge: window.RCIS_DATA.DISTRICTS.length.toString() },
-      { key: 'schedule',    icon: 'cal',    name: 'Schedule',     to: '/schedule' },
+      { key: 'matchmaker',  icon: 'cal',    name: 'Matchmaker',   to: '/matchmaker' },
       { key: 'board',       icon: 'list',   name: 'Tasks',        to: '/board' },
       { key: 'renewals',    icon: 'file',   name: 'Renewals',     to: '/renewals',    badge: '5' },
     ];

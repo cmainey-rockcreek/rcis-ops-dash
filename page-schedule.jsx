@@ -224,7 +224,7 @@
 
   function SchedulePage({ dark = false }) {
     return (
-      <window.PageShell dark={dark} activePage="schedule" searchPlaceholder="Schedule">
+      <window.PageShell dark={dark} activePage="matchmaker" searchPlaceholder="Matchmaker">
         {(pal) => <ScheduleWorkspace pal={pal} />}
       </window.PageShell>
     );
@@ -266,6 +266,15 @@
       setSelectedGapId(null);
       setSelectedContractorId(null);
     };
+
+    const totalWeeklyPotential = React.useMemo(
+      () => gaps.reduce((sum, g) => sum + gapWeeklyRevenue(g, rateOverrides), 0),
+      [gaps, rateOverrides],
+    );
+    const totalAvailableHours = React.useMemo(
+      () => contractors.reduce((sum, c) => sum + freeHours(c), 0),
+      [contractors],
+    );
 
     const rankedContractors = React.useMemo(() => {
       if (!selectedGap) return null;
@@ -337,7 +346,7 @@
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
           <div>
             <div style={{ fontSize: 20, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>
-              Schedule
+              Matchmaker
             </div>
             <div style={{ fontSize: 12.5, color: pal.textSoft, marginTop: 2 }}>
               Match coverage gaps to contractor availability. Click a gap to find a contractor, or a contractor to find a job.
@@ -360,6 +369,14 @@
           )}
         </div>
 
+        <OverviewStats
+          pal={pal}
+          weeklyPotential={totalWeeklyPotential}
+          openGaps={gaps.length}
+          availableHours={totalAvailableHours}
+          contractorCount={contractors.length}
+        />
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <GapsPanel
             pal={pal}
@@ -378,6 +395,7 @@
             ranked={rankedContractors}
             selectedContractorId={selectedContractorId}
             selectedGap={selectedGap}
+            gapRate={selectedGap ? effectiveRate(selectedGap, rateOverrides) : null}
             onSelectContractor={selectContractor}
             onCreateTask={openTaskDraftFor}
           />
@@ -437,14 +455,15 @@
     );
   }
 
-  function ContractorsPanel({ pal, contractors, ranked, selectedContractorId, selectedGap, onSelectContractor, onCreateTask }) {
+  function ContractorsPanel({ pal, contractors, ranked, selectedContractorId, selectedGap, gapRate, onSelectContractor, onCreateTask }) {
     const items = ranked ? ranked : contractors.map((c) => ({ c, fit: null }));
     const isRanked = !!ranked;
+    const totalFree = items.reduce((sum, x) => sum + freeHours(x.c), 0);
     return (
       <Panel pal={pal} title={isRanked ? `Best contractors for ${selectedGap.school}` : 'Contractors'}
-             subtitle={isRanked
+             subtitle={(isRanked
                ? `${items.length} match${items.length === 1 ? '' : 'es'} · ${selectedGap.spec} in ${selectedGap.state}, ${modalityLabel(gapModality(selectedGap))}, ${selectedGap.hours}h/wk`
-               : `${contractors.length} total`}>
+               : `${contractors.length} total`) + ` · ${totalFree}h available`}>
         {items.length === 0 ? (
           <Empty pal={pal} text="No contractors match this gap on specialty, state, and modality." />
         ) : (
@@ -455,6 +474,7 @@
                 pal={pal}
                 contractor={c}
                 fit={fit}
+                gapRate={isRanked ? gapRate : null}
                 neededHours={isRanked ? selectedGap.hours : null}
                 selected={c.id === selectedContractorId}
                 rankAction={isRanked
@@ -466,6 +486,67 @@
           </div>
         )}
       </Panel>
+    );
+  }
+
+  function OverviewStats({ pal, weeklyPotential, openGaps, availableHours, contractorCount }) {
+    const SCHOOL_WEEKS = 36;
+    const annual = weeklyPotential * SCHOOL_WEEKS;
+
+    const heroNumber = {
+      fontSize: 40,
+      fontWeight: 700,
+      color: pal.accent,
+      letterSpacing: -1,
+      lineHeight: 1,
+      fontVariantNumeric: 'tabular-nums',
+    };
+    const heroLabel = {
+      fontSize: 13,
+      fontWeight: 500,
+      color: pal.textSoft,
+      marginTop: 4,
+    };
+
+    return (
+      <div style={{
+        background: pal.card,
+        border: `1px solid ${pal.border}`,
+        borderRadius: 10,
+        padding: '20px 24px',
+      }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr 1fr',
+          alignItems: 'center',
+          gap: 24,
+        }}>
+          <div style={{ textAlign: 'left' }}>
+            <div style={heroNumber}>{fmtMoney(weeklyPotential)}</div>
+            <div style={heroLabel}>weekly potential</div>
+          </div>
+          <div style={{
+            fontSize: 13,
+            color: pal.textSoft,
+            textAlign: 'center',
+            lineHeight: 1.5,
+            alignSelf: 'end',
+          }}>
+            <span style={{ color: pal.text, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {availableHours.toLocaleString()} hours
+            </span>
+            <span> on the bench across {contractorCount} contractor{contractorCount === 1 ? '' : 's'} · </span>
+            <span style={{ color: pal.text, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {openGaps} open gap{openGaps === 1 ? '' : 's'}
+            </span>
+            <span> to fill</span>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={heroNumber}>{fmtMoney(annual)}</div>
+            <div style={heroLabel}>annualized ({SCHOOL_WEEKS}-wk school year)</div>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -553,18 +634,26 @@
     );
   }
 
-  function ContractorRow({ pal, contractor, fit, neededHours, selected, rankAction, onClick }) {
+  function ContractorRow({ pal, contractor, fit, gapRate, neededHours, selected, rankAction, onClick }) {
     const free = freeHours(contractor);
     const statusColors = STATUS_COLOR(pal);
     const sColor = statusColors[contractor.status] || pal.textFaint;
     const covers = neededHours == null ? null : (free >= neededHours);
     const mods = contractorModalities(contractor);
+    const hourly = (contractor.rates && Number.isFinite(contractor.rates.hourly))
+      ? contractor.rates.hourly : null;
+    const hasMargin = hourly != null && Number.isFinite(gapRate);
+    const marginHr = hasMargin ? (gapRate - hourly) : null;
+    const marginWeekly = hasMargin && Number.isFinite(neededHours) ? marginHr * neededHours : null;
+    const marginColor = marginHr == null
+      ? pal.textSoft
+      : marginHr > 0 ? pal.accent : pal.warn;
     return (
       <button
         onClick={onClick}
         style={{
           display: 'grid',
-          gridTemplateColumns: 'auto 1fr auto',
+          gridTemplateColumns: 'auto 1fr auto auto',
           gap: 10,
           alignItems: 'center',
           padding: '9px 11px',
@@ -606,6 +695,29 @@
               </span>
             )}
           </div>
+        </div>
+        <div style={{
+          textAlign: 'right',
+          minWidth: hasMargin ? 116 : 64,
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {hasMargin ? (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 700, color: marginColor, lineHeight: 1.2 }}>
+                {marginHr >= 0 ? '+' : ''}{fmtMoney(marginHr)}/hr
+              </div>
+              <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 1 }}>
+                cost {hourly != null ? fmtMoney(hourly) + '/hr' : '—'}
+                {marginWeekly != null && (
+                  <> · {marginWeekly >= 0 ? '+' : ''}{fmtMoney(marginWeekly)}/wk</>
+                )}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 12, color: pal.textSoft, fontWeight: 600 }}>
+              {hourly != null ? `${fmtMoney(hourly)}/hr` : '—'}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <SpecChip code={contractor.spec} />
