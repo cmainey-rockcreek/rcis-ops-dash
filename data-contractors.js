@@ -236,6 +236,7 @@
       email: emailOf(c.name),
       phone: phoneOf(rand, primaryState),
       city: cityOf(rand, primaryState),
+      modalities: c.modalities || ['tele', 'onsite'],
       npi: npiOf(rand),
       hireDate: hireDateFor(rand),
       rates,

@@ -35,7 +35,7 @@ window.RCIS_DATA = (() => {
     { id: 'c11', name: 'Marco Delvecchio', spec: 'PSY',  cap: 30, assigned: 16, status: 'avail',   states: ['MD'],      schools: 3 },
     { id: 'c12', name: 'Tasha Greene',     spec: 'BCBA', cap: 24, assigned: 22, status: 'partial', states: ['VA'],      schools: 4 },
     { id: 'c13', name: 'Owen Whitlock',    spec: 'OT',   cap: 28, assigned: 12, status: 'avail',   states: ['NC','SC'], schools: 3 },
-    { id: 'c14', name: 'Imani Forrest',    spec: 'MH',   cap: 30, assigned: 28, status: 'partial', states: ['VA','MD'], schools: 6 },
+    { id: 'c14', name: 'Imani Forrest',    spec: 'MH',   cap: 30, assigned: 28, status: 'partial', states: ['VA','MD','DC'], schools: 6 },
     { id: 'c15', name: 'Diego Marin',      spec: 'SLP',  cap: 32, assigned: 8,  status: 'avail',   states: ['VA'],      schools: 2 },
   ];
 
@@ -51,14 +51,16 @@ window.RCIS_DATA = (() => {
   ];
 
   // Coverage gaps — unfilled assignments needing attention.
+  // `modality` is 'onsite' | 'tele' | 'either' — see page-schedule.jsx for
+  // how it factors into matching (onsite adds a 100-mile rule).
   const COVERAGE_GAPS = [
-    { id: 'g1', school: 'Westbrook Elementary',     district: 'Loudoun County PS',   state: 'VA', spec: 'SLP',  hours: 12, posted: '4d',  priority: 'urgent', note: 'Anika Patel partial — needs co-coverage' },
-    { id: 'g2', school: 'Cedar Ridge Middle',       district: 'Wake County PS',      state: 'NC', spec: 'OT',   hours: 8,  posted: '6d',  priority: 'urgent', note: 'Maternity leave, starts 6/1' },
-    { id: 'g3', school: 'Harborview High',          district: 'Charleston County',   state: 'SC', spec: 'PSY',  hours: 15, posted: '2d',  priority: 'high',   note: 'New IEP load' },
-    { id: 'g4', school: 'Pinecrest Elementary',     district: 'Wake County PS',      state: 'NC', spec: 'BCBA', hours: 10, posted: '9d',  priority: 'high',   note: '2 cancellations from c02' },
-    { id: 'g5', school: 'Brookhaven Charter',       district: 'Independent',         state: 'DC', spec: 'MH',   hours: 6,  posted: '1d',  priority: 'medium', note: 'Add-on hours for Q4' },
-    { id: 'g6', school: 'Stonebridge Middle',       district: 'Prince William',      state: 'VA', spec: 'SPED', hours: 20, posted: '11d', priority: 'medium', note: 'Long-term sub through year end' },
-    { id: 'g7', school: 'Maple Glen K-8',           district: 'Fairfax County',      state: 'VA', spec: 'PT',   hours: 4,  posted: '14d', priority: 'low',    note: 'Low caseload — defer to fall?' },
+    { id: 'g1', school: 'Westbrook Elementary',     district: 'Loudoun County PS',   state: 'VA', spec: 'SLP',  hours: 12, posted: '4d',  priority: 'urgent', modality: 'onsite', note: 'Anika Patel partial — needs co-coverage' },
+    { id: 'g2', school: 'Cedar Ridge Middle',       district: 'Wake County PS',      state: 'NC', spec: 'OT',   hours: 8,  posted: '6d',  priority: 'urgent', modality: 'onsite', note: 'Maternity leave, starts 6/1' },
+    { id: 'g3', school: 'Harborview High',          district: 'Charleston County',   state: 'SC', spec: 'PSY',  hours: 15, posted: '2d',  priority: 'high',   modality: 'either', note: 'New IEP load' },
+    { id: 'g4', school: 'Pinecrest Elementary',     district: 'Wake County PS',      state: 'NC', spec: 'BCBA', hours: 10, posted: '9d',  priority: 'high',   modality: 'onsite', note: '2 cancellations from c02' },
+    { id: 'g5', school: 'Brookhaven Charter',       district: 'Independent',         state: 'DC', spec: 'MH',   hours: 6,  posted: '1d',  priority: 'medium', modality: 'tele',   note: 'Add-on hours for Q4' },
+    { id: 'g6', school: 'Stonebridge Middle',       district: 'Prince William',      state: 'VA', spec: 'SPED', hours: 20, posted: '11d', priority: 'medium', modality: 'onsite', note: 'Long-term sub through year end' },
+    { id: 'g7', school: 'Maple Glen K-8',           district: 'Fairfax County',      state: 'VA', spec: 'PT',   hours: 4,  posted: '14d', priority: 'low',    modality: 'onsite', note: 'Low caseload — defer to fall?' },
   ];
 
   // Upcoming renewals/deadlines.
