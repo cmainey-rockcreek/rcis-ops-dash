@@ -29,6 +29,7 @@
 
   function TasksWorkspace({ pal }) {
     const todos = window.useTodos();
+    const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
     const [editor, setEditor] = React.useState(null);
     const [dragId, setDragId] = React.useState(null);
     const [dragOver, setDragOver] = React.useState(null);
@@ -54,13 +55,14 @@
     const clearFilters = () => setFilters(DEFAULT_FILTERS);
 
     const openNew = (column = 'todo') => {
+      const current = window.TeamStore && window.TeamStore.current();
       setEditor({
         isNew: true,
         todo: {
           id: null,
           title: '',
           column,
-          owners: [],
+          owners: current ? [current.id] : [],
           label: 'Ops',
           priority: 'medium',
           due: null,
@@ -153,7 +155,7 @@
           <MetricCard pal={pal} label="Done this week" value={counts.doneThisWeek} tone="#3E8A57" />
         </div>
 
-        <Filters pal={pal} filters={filters} setFilter={setFilter} clearFilters={clearFilters} />
+        <Filters pal={pal} team={team} filters={filters} setFilter={setFilter} clearFilters={clearFilters} />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 12, minHeight: 0 }}>
           <div style={{
@@ -187,7 +189,7 @@
             </div>
           </div>
 
-          <FocusPanel pal={pal} todos={todos} onOpen={openEdit} />
+          <FocusPanel pal={pal} team={team} todos={todos} onOpen={openEdit} />
         </div>
 
         {editor && (
@@ -225,7 +227,7 @@
     );
   }
 
-  function Filters({ pal, filters, setFilter, clearFilters }) {
+  function Filters({ pal, team, filters, setFilter, clearFilters }) {
     const inputStyle = {
       height: 34,
       padding: '0 10px',
@@ -262,7 +264,7 @@
         <select style={inputStyle} value={filters.owner} onChange={(e) => setFilter('owner', e.target.value)}>
           <option value="all">All owners</option>
           <option value="unassigned">Unassigned</option>
-          {window.RCIS_DATA.TEAM.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          {team.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
         <select style={inputStyle} value={filters.status} onChange={(e) => setFilter('status', e.target.value)}>
           <option value="open">Open</option>
@@ -450,7 +452,7 @@
     );
   }
 
-  function FocusPanel({ pal, todos, onOpen }) {
+  function FocusPanel({ pal, team, todos, onOpen }) {
     const dueNow = React.useMemo(() => todos
       .filter((t) => t.column !== 'done' && (isOverdue(t.due) || isToday(t.due)))
       .sort(sortTasks)
@@ -460,11 +462,11 @@
       .sort(sortTasks)
       .slice(0, 6), [todos]);
     const ownerCounts = React.useMemo(() => {
-      return window.RCIS_DATA.TEAM.map((m) => ({
+      return team.map((m) => ({
         ...m,
         count: todos.filter((t) => t.column !== 'done' && t.owners && t.owners.includes(m.id)).length,
       }));
-    }, [todos]);
+    }, [todos, team]);
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

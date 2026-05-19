@@ -158,6 +158,7 @@
   function Kanban({ pal }) {
     const TodoEditor = window.TodoEditor;
     const todos = window.useTodos();
+    const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
     const [editor, setEditor] = React.useState(null); // { todo, isNew } | null
     const [dragId, setDragId] = React.useState(null);
     const [dragOver, setDragOver] = React.useState(null);
@@ -176,10 +177,11 @@
     }, [todos]);
 
     const openNew = (column) => {
+      const current = window.TeamStore && window.TeamStore.current();
       setEditor({
         todo: {
           id: null, title: '', column: column || 'todo',
-          owners: [], label: 'Ops', priority: 'medium',
+          owners: current ? [current.id] : [], label: 'Ops', priority: 'medium',
           due: null, linkedTo: null,
         },
         isNew: true,
@@ -231,7 +233,7 @@
             <span style={{ fontSize: 11, color: pal.textFaint }}>· {todos.length} cards · {todos.filter(t => t.column !== 'done').length} open</span>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ display: 'flex', gap: 4 }}>
-                {window.RCIS_DATA.TEAM.map(t => {
+                {team.map(t => {
                   const count = todos.filter(x => x.owners.includes(t.id) && x.column !== 'done').length;
                   return (
                     <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '2px 8px 2px 4px',
@@ -492,6 +494,9 @@
 
   // ─── Main ─────────────────────────────────────────────────────────────────
   function DashboardCalm({ dark = false, widgets = {} }) {
+    if (window.useTeam) window.useTeam();
+    const current = window.TeamStore && window.TeamStore.current();
+    const firstName = current && current.name ? current.name.split(' ')[0] : 'there';
     const show = (k) => widgets[k] !== false;
     return (
       <window.PageShell dark={dark} activePage="dashboard">
@@ -503,7 +508,7 @@
           }}>
             <div>
               <div style={{ fontSize: 20, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>
-                Good morning, Sarah
+                Good morning, {firstName}
               </div>
               <div style={{ fontSize: 12.5, color: pal.textSoft, marginTop: 2 }}>
                 {window.RCIS_TODAY} · <span style={{ color: pal.warn, fontWeight: 600 }}>3 urgent gaps</span> · 5 renewals due in 30 days

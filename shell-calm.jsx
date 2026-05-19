@@ -62,7 +62,7 @@
 
   // ─── Top Bar ──────────────────────────────────────────────────────────────
   function CalmTopBar({ pal, searchPlaceholder }) {
-    const team = window.RCIS_DATA.TEAM;
+    const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
     return (
       <div style={{
         height: 56, flexShrink: 0,
@@ -255,12 +255,19 @@
 
   function SignedInAs({ pal }) {
     const auth = window.useAuth ? window.useAuth() : { user: null };
+    if (window.useTeam) window.useTeam();
+    const current = window.TeamStore && window.TeamStore.current();
     if (!auth.user) return null;
     return (
       <div>
         <div style={{ color: pal.railText, fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {auth.user.email}
+          {(current && current.name) || auth.user.email}
         </div>
+        {current && current.email && current.name !== current.email && (
+          <div style={{ color: pal.railTextFaint, fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {current.email}
+          </div>
+        )}
         <a onClick={() => window.signOut && window.signOut()} style={{
           color: pal.railTextFaint, fontSize: 11, cursor: 'pointer', marginTop: 4, display: 'inline-block',
         }}>Sign out</a>

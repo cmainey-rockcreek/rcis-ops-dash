@@ -58,6 +58,7 @@
   window.attachmentKindMeta = (kind) => KIND_META[kind] || KIND_META.link;
 
   function TodoEditor({ todo, pal, onSave, onDelete, onClose, isNew }) {
+    const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
     // Old todos in localStorage may pre-date notes/attachments — default them.
     const [draft, setDraft] = React.useState({
       notes: '',
@@ -230,7 +231,7 @@
             <div style={{
               fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase',
               color: pal.textFaint,
-            }}>{isNew ? 'New todo' : 'Edit todo'}</div>
+            }}>{isNew ? 'New task' : 'Edit task'}</div>
             <span style={{ marginLeft: 'auto', fontSize: 11, color: pal.textFaint }}>
               {!isNew && draft.updatedAt && `Last edited ${timeAgo(draft.updatedAt)}`}
             </span>
@@ -296,7 +297,7 @@
             <div>
               <div style={styles.label}>Owners</div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {window.RCIS_DATA.TEAM.map((m) => {
+                {team.map((m) => {
                   const on = draft.owners.includes(m.id);
                   return (
                     <div key={m.id} style={styles.ownerBtn(on)} onClick={() => toggleOwner(m.id)}>

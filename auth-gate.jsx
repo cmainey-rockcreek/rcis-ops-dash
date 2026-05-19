@@ -25,6 +25,7 @@
 
   function LoginScreen() {
     const [mode, setMode] = React.useState('signin'); // 'signin' | 'signup'
+    const [fullName, setFullName] = React.useState('');
     const [email, setEmail] = React.useState('');
     const [password, setPassword] = React.useState('');
     const [busy, setBusy] = React.useState(false);
@@ -38,7 +39,7 @@
         if (mode === 'signin') {
           await window.signInWithPassword({ email: email.trim(), password });
         } else {
-          await window.signUpWithPassword({ email: email.trim(), password });
+          await window.signUpWithPassword({ email: email.trim(), password, fullName: fullName.trim() });
           setInfo('Check your email to confirm the account, then sign in.');
         }
       } catch (err) {
@@ -77,6 +78,12 @@
           }}>{mode === 'signin' ? 'Sign in to your team account' : 'Create a team account'}</p>
 
           <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {mode === 'signup' && (
+              <input type="text" required
+                value={fullName} onChange={(e) => setFullName(e.target.value)}
+                placeholder="Full name"
+                style={inputStyle} />
+            )}
             <input type="email" required autoFocus
               value={email} onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
@@ -99,7 +106,7 @@
                 color: '#157C75', fontSize: 12,
               }}>{info}</div>
             )}
-            <button type="submit" disabled={busy || !email || !password.length} style={{
+            <button type="submit" disabled={busy || !email || !password.length || (mode === 'signup' && !fullName.trim())} style={{
               marginTop: 4,
               height: 40, padding: '0 16px',
               background: '#157C75', color: '#fff',

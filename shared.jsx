@@ -29,7 +29,10 @@ window.specName = (code) => {
   const m = (window.RCIS_DATA.SPECIALTIES || []).find((s) => s.code === code);
   return m ? m.name : code;
 };
-window.teamMember = (id) => (window.RCIS_DATA.TEAM || []).find((t) => t.id === id) || { name: '?', initials: '?', color: '#888' };
+window.teamMember = (id) => {
+  const team = window.TeamStore ? window.TeamStore.all() : (window.RCIS_DATA.TEAM || []);
+  return team.find((t) => t.id === id) || { name: '?', initials: '?', color: '#888' };
+};
 
 // Tiny avatar with initials. Size adapts.
 window.OwnerAvatar = function OwnerAvatar({ id, size = 22, title, ring }) {

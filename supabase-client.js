@@ -4,7 +4,7 @@
 //   window.sb              – Supabase client
 //   window.useAuth()       – React hook → { user, session, status }
 //   window.signInWithPassword({email, password})
-//   window.signUpWithPassword({email, password})
+//   window.signUpWithPassword({email, password, fullName})
 //   window.signOut()
 //
 // We're using email+password (not magic link) because it's the simplest
@@ -62,13 +62,21 @@
   };
 
   window.signInWithPassword = async ({ email, password }) => {
-    const { error } = await client.auth.signInWithPassword({ email, password });
+    const { data, error } = await client.auth.signInWithPassword({ email, password });
     if (error) throw error;
+    if (data.user && window.TeamStore) await window.TeamStore.ensureCurrentProfile(data.user);
   };
 
-  window.signUpWithPassword = async ({ email, password }) => {
-    const { error } = await client.auth.signUp({ email, password });
+  window.signUpWithPassword = async ({ email, password, fullName }) => {
+    const { data, error } = await client.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: (fullName || '').trim() },
+      },
+    });
     if (error) throw error;
+    if (data.user && data.session && window.TeamStore) await window.TeamStore.ensureCurrentProfile(data.user);
   };
 
   window.signOut = async () => {

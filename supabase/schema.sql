@@ -21,6 +21,22 @@ create table if not exists public.todos (
 create index if not exists todos_column_idx     on public.todos (column_name);
 create index if not exists todos_updated_at_idx on public.todos (updated_at desc);
 
+-- ─── team_profiles ────────────────────────────────────────────────────────
+-- One public profile per Supabase Auth user. Auth users themselves live in the
+-- private auth schema, so the app reads this smaller team-safe profile table.
+create table if not exists public.team_profiles (
+  id            uuid primary key references auth.users(id) on delete cascade,
+  email         text not null unique,
+  full_name     text not null default '',
+  role          text not null default 'Team',
+  initials      text not null default '',
+  color         text not null default '#1FA39A',
+  active        boolean not null default true,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+create index if not exists team_profiles_active_idx on public.team_profiles (active, full_name);
+
 -- ─── contacts ─────────────────────────────────────────────────────────────
 create table if not exists public.contacts (
   id            text primary key,
@@ -71,6 +87,10 @@ drop trigger if exists touch_todos on public.todos;
 create trigger touch_todos before update on public.todos
   for each row execute function public.touch_updated_at();
 
+drop trigger if exists touch_team_profiles on public.team_profiles;
+create trigger touch_team_profiles before update on public.team_profiles
+  for each row execute function public.touch_updated_at();
+
 drop trigger if exists touch_contacts on public.contacts;
 create trigger touch_contacts before update on public.contacts
   for each row execute function public.touch_updated_at();
@@ -79,11 +99,83 @@ drop trigger if exists touch_entity_notes on public.entity_notes;
 create trigger touch_entity_notes before update on public.entity_notes
   for each row execute function public.touch_updated_at();
 
+-- ─── Auth user → team profile automation ─────────────────────────────────
+create or replace function public.profile_initials(full_name text, email text)
+returns text language plpgsql immutable as $$
+declare
+  cleaned text;
+  parts text[];
+begin
+  cleaned := trim(coalesce(nullif(full_name, ''), split_part(coalesce(email, ''), '@', 1), 'Team Member'));
+  cleaned := regexp_replace(cleaned, '[._-]+', ' ', 'g');
+  parts := regexp_split_to_array(cleaned, '\s+');
+
+  if array_length(parts, 1) >= 2 then
+    return upper(left(parts[1], 1) || left(parts[array_length(parts, 1)], 1));
+  end if;
+  return upper(left(cleaned, 2));
+end;
+$$;
+
+create or replace function public.profile_color(user_id uuid)
+returns text language plpgsql immutable as $$
+declare
+  colors text[] := array['#1FA39A', '#E76B5D', '#1B2956', '#7A5AE0', '#C98A2C', '#3E8A57', '#5A6478'];
+  idx int;
+begin
+  idx := (get_byte(decode(substr(md5(user_id::text), 1, 2), 'hex'), 0) % array_length(colors, 1)) + 1;
+  return colors[idx];
+end;
+$$;
+
+create or replace function public.handle_new_auth_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  display_name text;
+begin
+  display_name := nullif(trim(coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', '')), '');
+
+  insert into public.team_profiles (id, email, full_name, initials, color)
+  values (
+    new.id,
+    coalesce(new.email, ''),
+    coalesce(display_name, split_part(coalesce(new.email, ''), '@', 1)),
+    public.profile_initials(display_name, new.email),
+    public.profile_color(new.id)
+  )
+  on conflict (id) do update set
+    email = excluded.email,
+    full_name = coalesce(nullif(public.team_profiles.full_name, ''), excluded.full_name),
+    initials = coalesce(nullif(public.team_profiles.initials, ''), excluded.initials),
+    updated_at = now();
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_auth_user();
+
+insert into public.team_profiles (id, email, full_name, initials, color)
+select
+  id,
+  coalesce(email, ''),
+  coalesce(nullif(raw_user_meta_data->>'full_name', ''), nullif(raw_user_meta_data->>'name', ''), split_part(coalesce(email, ''), '@', 1)),
+  public.profile_initials(coalesce(nullif(raw_user_meta_data->>'full_name', ''), nullif(raw_user_meta_data->>'name', '')), email),
+  public.profile_color(id)
+from auth.users
+on conflict (id) do update set
+  email = excluded.email,
+  updated_at = now();
+
 -- ─── Row-level security ───────────────────────────────────────────────────
 -- Enable RLS on all tables, then grant authenticated users full access.
 -- This means: only logged-in team members can read or write anything,
 -- and anonymous (logged-out) access is blocked.
 alter table public.todos        enable row level security;
+alter table public.team_profiles enable row level security;
 alter table public.contacts     enable row level security;
 alter table public.documents    enable row level security;
 alter table public.entity_notes enable row level security;
@@ -91,6 +183,18 @@ alter table public.entity_notes enable row level security;
 drop policy if exists "team full access" on public.todos;
 create policy "team full access" on public.todos
   for all to authenticated using (true) with check (true);
+
+drop policy if exists "team profiles visible to signed-in users" on public.team_profiles;
+create policy "team profiles visible to signed-in users" on public.team_profiles
+  for select to authenticated using (true);
+
+drop policy if exists "users can create own team profile" on public.team_profiles;
+create policy "users can create own team profile" on public.team_profiles
+  for insert to authenticated with check (auth.uid() = id);
+
+drop policy if exists "users can update own team profile" on public.team_profiles;
+create policy "users can update own team profile" on public.team_profiles
+  for update to authenticated using (auth.uid() = id) with check (auth.uid() = id);
 
 drop policy if exists "team full access" on public.contacts;
 create policy "team full access" on public.contacts
@@ -106,7 +210,23 @@ create policy "team full access" on public.entity_notes
 
 -- ─── Realtime ─────────────────────────────────────────────────────────────
 -- Lets the app receive live updates when teammates change anything.
-alter publication supabase_realtime add table public.todos;
-alter publication supabase_realtime add table public.contacts;
-alter publication supabase_realtime add table public.documents;
-alter publication supabase_realtime add table public.entity_notes;
+do $$ begin
+  alter publication supabase_realtime add table public.todos;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.team_profiles;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.contacts;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.documents;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.entity_notes;
+exception when duplicate_object then null;
+end $$;
