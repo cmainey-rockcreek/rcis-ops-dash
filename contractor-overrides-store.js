@@ -15,6 +15,9 @@ window.ContractorOverridesStore = (() => {
       payRate: r.pay_rate != null ? Number(r.pay_rate) : null,
       billRate: r.bill_rate != null ? Number(r.bill_rate) : null,
       schedule: Array.isArray(r.schedule) ? r.schedule : null,
+      email: r.email || null,
+      phone: r.phone || null,
+      city:  r.city  || null,
       updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : Date.now(),
     };
   }
@@ -24,6 +27,9 @@ window.ContractorOverridesStore = (() => {
       pay_rate: o.payRate != null ? o.payRate : null,
       bill_rate: o.billRate != null ? o.billRate : null,
       schedule: o.schedule || null,
+      email: o.email || null,
+      phone: o.phone || null,
+      city:  o.city  || null,
     };
   }
 
@@ -113,7 +119,8 @@ window.useContractorOverrides = function useContractorOverrides() {
 };
 
 // Convenience: returns the contractor with overrides applied. Falls back to
-// mock values when no override exists.
+// mock values when no override exists. Contact fields (email/phone/city)
+// also flow through this so the contractor header can edit them inline.
 window.useContractorView = function useContractorView(c) {
   const all = window.useContractorOverrides();
   return React.useMemo(() => {
@@ -125,6 +132,13 @@ window.useContractorView = function useContractorView(c) {
       bill:   o.billRate != null ? o.billRate : (c.rates && c.rates.bill),
     };
     const schedule = o.schedule || c.schedule;
-    return { ...c, rates, schedule };
+    return {
+      ...c,
+      rates,
+      schedule,
+      email: o.email != null ? o.email : c.email,
+      phone: o.phone != null ? o.phone : c.phone,
+      city:  o.city  != null ? o.city  : c.city,
+    };
   }, [c, all]);
 };

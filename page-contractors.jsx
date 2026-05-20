@@ -426,9 +426,15 @@
             display: 'flex', flexWrap: 'wrap', gap: 18,
             marginTop: 6, fontSize: 12.5, color: pal.textSoft,
           }}>
-            <Field icon="user" label={c.email} />
-            <Field icon="user" label={c.phone} />
-            <Field icon="map" label={c.city} />
+            <EditableContactField pal={pal} icon="user" placeholder="Add email"
+              value={c.email}
+              onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { email: v })} />
+            <EditableContactField pal={pal} icon="user" placeholder="Add phone"
+              value={c.phone}
+              onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { phone: v })} />
+            <EditableContactField pal={pal} icon="map" placeholder="Add city"
+              value={c.city}
+              onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { city: v })} />
             <Field label="NPI" value={c.npi} pal={pal} />
             <Field label="Hired" value={formatDate(c.hireDate)} pal={pal} />
             <Field label="Schools" value={`${c.schools}`} pal={pal} />
@@ -539,6 +545,76 @@
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
         {icon && <Icon name={icon} size={12} stroke={1.8} />}
         {label}
+      </span>
+    );
+  }
+
+  // Inline-editable contact field used in the contractor header. Click to
+  // edit, Enter or blur to save, Escape to cancel.
+  function EditableContactField({ pal, icon, value, placeholder, onSave }) {
+    const [editing, setEditing] = React.useState(false);
+    const [draft, setDraft] = React.useState(value || '');
+    const inputRef = React.useRef(null);
+
+    React.useEffect(() => {
+      if (editing && inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.select();
+      }
+    }, [editing]);
+
+    const startEdit = () => { setDraft(value || ''); setEditing(true); };
+    const commit = () => {
+      const next = draft.trim();
+      if (next !== (value || '').trim()) onSave(next || null);
+      setEditing(false);
+    };
+    const cancel = () => { setDraft(value || ''); setEditing(false); };
+    const onKey = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    };
+
+    if (editing) {
+      return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          {icon && <Icon name={icon} size={12} stroke={1.8} />}
+          <input
+            ref={inputRef}
+            value={draft}
+            placeholder={placeholder}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={onKey}
+            style={{
+              padding: '1px 5px',
+              fontSize: 12.5, color: pal.text,
+              background: pal.cardAlt,
+              border: `1px solid ${pal.accent}`, borderRadius: 4,
+              outline: 'none', fontFamily: 'inherit',
+              minWidth: 140,
+            }}
+          />
+        </span>
+      );
+    }
+
+    const display = value && value.trim().length > 0;
+    return (
+      <span onClick={startEdit}
+        title="Click to edit"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          cursor: 'pointer',
+          borderBottom: `1px dashed transparent`,
+          paddingBottom: 1,
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.borderBottomColor = pal.borderSoft}
+        onMouseLeave={(e) => e.currentTarget.style.borderBottomColor = 'transparent'}>
+        {icon && <Icon name={icon} size={12} stroke={1.8} />}
+        <span style={{ color: display ? 'inherit' : pal.textFaint, fontStyle: display ? 'normal' : 'italic' }}>
+          {display ? value : placeholder}
+        </span>
       </span>
     );
   }

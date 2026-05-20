@@ -178,6 +178,9 @@ create table if not exists public.contractor_overrides (
   pay_rate       numeric,
   bill_rate      numeric,
   schedule       jsonb,
+  email          text,
+  phone          text,
+  city           text,
   updated_at     timestamptz not null default now()
 );
 
