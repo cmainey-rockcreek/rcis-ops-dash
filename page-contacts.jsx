@@ -78,9 +78,10 @@
       <div style={{
         flex: 1, padding: '20px 24px',
         display: 'flex', flexDirection: 'column', gap: 14,
-        overflowY: 'auto',
+        overflow: 'hidden',
+        minHeight: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>Contacts</h1>
           <span style={{ fontSize: 13, color: pal.textSoft }}>{rows.length} of {contacts.length}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -94,6 +95,7 @@
           display: 'flex', alignItems: 'center', gap: 10,
           padding: '8px 12px',
           background: pal.card, border: `1px solid ${pal.border}`, borderRadius: 9,
+          flexShrink: 0,
         }}>
           <Icon name="search" size={15} color={pal.textFaint} stroke={1.8} />
           <input value={query} onChange={(e) => setQuery(e.target.value)}
@@ -111,7 +113,7 @@
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
           {SCOPE_OPTS.map((opt) => {
             const on = scopeFilter === opt.key;
             return (
@@ -132,18 +134,25 @@
           })}
         </div>
 
+        {/* List — its own scroll container so header + filters stay pinned
+            while you page through long contact lists. */}
         <div style={{
           background: pal.card, border: `1px solid ${pal.border}`,
-          borderRadius: 10, overflow: 'hidden',
+          borderRadius: 10,
+          flex: 1, minHeight: 0,
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
         }}>
-          {rows.length === 0 ? (
-            <div style={{ padding: '40px 14px', textAlign: 'center',
-              color: pal.textFaint, fontSize: 13 }}>
-              No contacts match.
-            </div>
-          ) : (
-            rows.map((c) => <ContactRow key={c.id} c={c} pal={pal} onClick={() => openEdit(c)} />)
-          )}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {rows.length === 0 ? (
+              <div style={{ padding: '40px 14px', textAlign: 'center',
+                color: pal.textFaint, fontSize: 13 }}>
+                No contacts match.
+              </div>
+            ) : (
+              rows.map((c) => <ContactRow key={c.id} c={c} pal={pal} onClick={() => openEdit(c)} />)
+            )}
+          </div>
         </div>
 
         {editor && (
