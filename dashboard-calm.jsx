@@ -688,6 +688,73 @@
     const current = window.TeamStore && window.TeamStore.current();
     const firstName = current && current.name ? current.name.split(' ')[0] : 'there';
     const show = (k) => widgets[k] !== false;
+
+    // Live data for the greeting + stat tiles.
+    const gaps        = window.useCoverageGaps ? window.useCoverageGaps() : [];
+    const renewals    = window.useRenewals     ? window.useRenewals()     : [];
+    const assignments = window.useAssignments  ? window.useAssignments()  : [];
+    const overrides   = window.useContractorOverrides ? window.useContractorOverrides() : {};
+
+    const today = new Date().toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric',
+    });
+
+    const urgentGapsCount = gaps.filter((g) => g.status === 'open' && g.priority === 'urgent').length;
+    const openGapsCount   = gaps.filter((g) => g.status === 'open').length;
+
+    const renewalUrgency = window.renewalUrgency || (() => null);
+    const renewalsSoonCount = renewals.filter((r) => {
+      if (r.status === 'lapsed') return false;
+      const u = renewalUrgency(r.expiresOn);
+      return u === 'overdue' || u === 'soon';   // ≤30 days incl. overdue
+    }).length;
+    const renewalsAtRiskCount = renewals.filter((r) => {
+      const u = renewalUrgency(r.expiresOn);
+      return u === 'overdue' || u === 'soon';
+    }).length;
+
+    const contractors = window.RCIS_DATA.CONTRACTORS;
+    const activeContractorsCount = contractors.filter((c) =>
+      c.status === 'avail' || c.status === 'partial' || c.status === 'full').length;
+
+    // Annualized revenue + weekly booked hours across all active assignments
+    // (real Supabase rows merged with mock seed assignments).
+    let totalAnnualRev = 0;
+    let weeklyBookedHours = 0;
+    const F = window.ContractorFinancials;
+    if (F) {
+      contractors.forEach((rawC) => {
+        const c = window.applyContractorOverride
+          ? window.applyContractorOverride(rawC, overrides)
+          : rawC;
+        const mock = (rawC.assignments || []).map((m) => ({ ...m, source: 'mock' }));
+        const real = assignments
+          .filter((a) => a.contractorId === rawC.id)
+          .map((a) => {
+            const direct = Number(a.directHours) || 0;
+            const indirect = a.indirectOverride
+              ? (Number(a.indirectHours) || 0)
+              : (window.AssignmentsStore && window.AssignmentsStore.autoIndirect
+                  ? window.AssignmentsStore.autoIndirect(direct) : 0);
+            return {
+              direct, indirect, status: a.status || 'active',
+              payRate: a.payRate, billRate: a.billRate,
+            };
+          });
+        const merged = [...real, ...mock];
+        const defaults = { bill: c.rates && c.rates.bill, pay: c.rates && c.rates.hourly };
+        totalAnnualRev   += F.annualRevenue(merged, defaults);
+        weeklyBookedHours += F.weeklyHours
+          ? merged.filter((a) => a.status === 'active').reduce((s, a) => s + F.weeklyHours(a), 0)
+          : 0;
+      });
+    }
+
+    // Compact currency for the revenue tile so $1.5M / $42K fit cleanly.
+    const fmtCompact = new Intl.NumberFormat('en-US', {
+      style: 'currency', currency: 'USD',
+      notation: 'compact', maximumFractionDigits: 1,
+    });
     return (
       <window.PageShell dark={dark} activePage="home">
         {(pal) => (
@@ -701,17 +768,44 @@
                 Good morning, {firstName}
               </div>
               <div style={{ fontSize: 12.5, color: pal.textSoft, marginTop: 2 }}>
-                {window.RCIS_TODAY} · <span style={{ color: pal.warn, fontWeight: 600 }}>3 urgent gaps</span> · 5 renewals due in 30 days
+                {today}
+                {urgentGapsCount > 0 && (
+                  <>
+                    {' · '}
+                    <span style={{ color: pal.warn, fontWeight: 600 }}>
+                      {urgentGapsCount} urgent gap{urgentGapsCount === 1 ? '' : 's'}
+                    </span>
+                  </>
+                )}
+                {renewalsSoonCount > 0 && (
+                  <>{' · '}{renewalsSoonCount} renewal{renewalsSoonCount === 1 ? '' : 's'} due in 30 days</>
+                )}
+                {urgentGapsCount === 0 && renewalsSoonCount === 0 && (
+                  <> · <span style={{ color: pal.textFaint }}>nothing urgent today</span></>
+                )}
               </div>
             </div>
 
             {show('stats') && (
               <div style={{ display: 'flex', gap: 10 }}>
-                <StatTile pal={pal} label="Hours last week"    value="1,284" delta="+38"  deltaSub="vs prior week" trend={[1180,1200,1220,1240,1260,1270,1278,1280,1282,1285,1284,1284]} deltaTone="pos" />
-                <StatTile pal={pal} label="Active contractors" value="48"  delta="+2"   deltaSub="net hires"     trend={[43,44,44,45,46,46,47,47,47,48,48,48]}             deltaTone="pos" />
-                <StatTile pal={pal} label="Open coverage"     value="7"   delta="+1"   deltaSub="3 urgent"      trend={[5,5,6,6,6,7,7,7,8,7,7,7]}                          deltaTone="neg" />
-                <StatTile pal={pal} label="Renewals < 30d"    value="5"   delta="—"    deltaSub="1 this week"   trend={[3,3,4,4,4,4,5,5,5,5,5,5]}                          deltaTone="neutral" />
-                <StatTile pal={pal} label="Hours filled"      value="92%" delta="+0.4" deltaSub="vs last week"  trend={[88,89,90,90,91,92,92,93,92,93,92,93]}              deltaTone="pos" />
+                <StatTile pal={pal} label="Annual revenue"
+                  value={fmtCompact.format(totalAnnualRev || 0)}
+                  deltaSub="active assignments · 36-wk year" />
+                <StatTile pal={pal} label="Active contractors"
+                  value={String(activeContractorsCount)}
+                  deltaSub={`of ${contractors.length} total`} />
+                <StatTile pal={pal} label="Open coverage"
+                  value={String(openGapsCount)}
+                  delta={urgentGapsCount > 0 ? String(urgentGapsCount) : null}
+                  deltaTone={urgentGapsCount > 0 ? 'neg' : 'neutral'}
+                  deltaSub={urgentGapsCount > 0 ? `${urgentGapsCount} urgent` : 'none urgent'} />
+                <StatTile pal={pal} label="Renewals at risk"
+                  value={String(renewalsAtRiskCount)}
+                  deltaTone={renewalsAtRiskCount > 0 ? 'neg' : 'neutral'}
+                  deltaSub="overdue + ≤30d" />
+                <StatTile pal={pal} label="Booked this week"
+                  value={`${Math.round(weeklyBookedHours)}h`}
+                  deltaSub="across active assignments" />
               </div>
             )}
 
