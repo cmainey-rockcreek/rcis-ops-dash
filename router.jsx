@@ -23,6 +23,7 @@
     }
     if (segs[0] === 'contacts') {
       if (segs.length === 1) return { name: 'contacts', segs };
+      return { name: 'contact', segs, id: segs[1] };
     }
     if (segs[0] === 'districts') {
       if (segs.length === 1) return { name: 'districts', segs };

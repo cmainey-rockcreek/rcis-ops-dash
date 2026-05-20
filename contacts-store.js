@@ -139,6 +139,30 @@ window.ContactsStore = (() => {
   };
 })();
 
+// Live name lookup for any linkedTo entry on a task. Falls back to the
+// snapshot (linkedTo.name) when the referenced record can't be found.
+// Used by Kanban + Tasks list so renames propagate instantly.
+window.resolveLinkedName = function resolveLinkedName(linkedTo) {
+  if (!linkedTo) return '';
+  const { type, id, name } = linkedTo;
+  if (type === 'contractor' && window.contractorDisplayName) {
+    return window.contractorDisplayName(id) || name || '';
+  }
+  if (type === 'contact' && window.ContactsStore) {
+    const c = window.ContactsStore.get().find((x) => x.id === id);
+    return (c && c.name) || name || '';
+  }
+  if (type === 'school' && window.RCIS_DATA) {
+    const s = window.RCIS_DATA.SCHOOLS.find((x) => x.id === id);
+    return (s && s.name) || name || '';
+  }
+  if (type === 'district' && window.RCIS_DATA) {
+    const d = window.RCIS_DATA.DISTRICTS.find((x) => x.id === id);
+    return (d && d.name) || name || '';
+  }
+  return name || '';
+};
+
 window.useContacts = function useContacts() {
   const [s, setS] = React.useState(window.ContactsStore.get());
   React.useEffect(() => window.ContactsStore.subscribe(setS), []);

@@ -189,6 +189,8 @@
       onSave({ ...draft, title: draft.title.trim() });
     };
 
+    // Subscribe to contacts so renamed contacts appear in the picker live.
+    const contactRows = window.useContacts ? window.useContacts() : [];
     const linkOptions = React.useMemo(() => {
       const out = [];
       const q = linkQuery.trim().toLowerCase();
@@ -197,6 +199,11 @@
         const c = window.applyContractorOverride ? window.applyContractorOverride(raw) : raw;
         if (match(c.name) || match(c.spec)) out.push({ type: 'contractor', id: c.id, name: c.name, sub: c.spec });
       });
+      contactRows.forEach((p) => {
+        if (match(p.name) || match(p.role) || match(p.organization || '')) {
+          out.push({ type: 'contact', id: p.id, name: p.name, sub: [p.role, p.organization].filter(Boolean).join(' · ') });
+        }
+      });
       window.RCIS_DATA.SCHOOLS.forEach((s) => {
         if (match(s.name) || match(s.state)) out.push({ type: 'school', id: s.id, name: s.name, sub: s.state });
       });
@@ -204,7 +211,7 @@
         if (match(d.name) || match(d.state)) out.push({ type: 'district', id: d.id, name: d.name, sub: d.state });
       });
       return out.slice(0, 20);
-    }, [linkQuery]);
+    }, [linkQuery, contactRows]);
 
     const styles = {
       backdrop: {
@@ -806,6 +813,7 @@
   function LinkTypeBadge({ type, pal }) {
     const map = {
       contractor: { txt: 'CONT', c: '#1FA39A' },
+      contact:    { txt: 'CON',  c: '#7A5AE0' },
       school:     { txt: 'SCH',  c: '#E76B5D' },
       district:   { txt: 'DIST', c: '#1B2956' },
     };

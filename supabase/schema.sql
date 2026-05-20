@@ -220,7 +220,7 @@ create index if not exists contacts_name_idx on public.contacts (name);
 -- task/renewal attachments and stream via signed URLs on click.
 create table if not exists public.documents (
   id            text primary key,
-  scope         text not null check (scope in ('district','school','contractor')),
+  scope         text not null check (scope in ('district','school','contractor','contact')),
   scope_id      text not null,
   kind          text not null default 'link',
   url           text,
@@ -236,7 +236,7 @@ create index if not exists documents_scope_idx on public.documents (scope, scope
 -- ─── entity_notes ─────────────────────────────────────────────────────────
 -- Free-text notes box on a district / school / contractor profile.
 create table if not exists public.entity_notes (
-  scope         text not null check (scope in ('district','school','contractor')),
+  scope         text not null check (scope in ('district','school','contractor','contact')),
   scope_id      text not null,
   content       text not null default '',
   updated_at    timestamptz not null default now(),
