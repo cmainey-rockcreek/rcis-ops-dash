@@ -175,6 +175,7 @@ create index if not exists schedule_slots_date_idx             on public.schedul
 -- (5 weekdays × 4 blocks: AM/Mid/PM/Late, each 0–3 load).
 create table if not exists public.contractor_overrides (
   contractor_id  text primary key,
+  name           text,
   pay_rate       numeric,
   bill_rate      numeric,
   schedule       jsonb,

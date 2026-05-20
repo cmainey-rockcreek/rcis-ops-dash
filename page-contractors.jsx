@@ -39,9 +39,15 @@
       return s;
     }, [todos]);
 
+    // Apply contractor_overrides so renames / contact edits show up in
+    // the list. Falls back to mock when no override exists.
+    const enriched = window.useContractorsView
+      ? window.useContractorsView(window.RCIS_DATA.CONTRACTORS)
+      : window.RCIS_DATA.CONTRACTORS;
+
     const sortedFiltered = React.useMemo(() => {
       const q = query.trim().toLowerCase();
-      let rows = window.RCIS_DATA.CONTRACTORS.filter((c) => {
+      let rows = enriched.filter((c) => {
         if (statusFilter !== 'all' && c.status !== statusFilter) return false;
         if (specFilter !== 'all' && c.spec !== specFilter) return false;
         if (openTodosOnly && !idsWithOpenTodos.has(c.id)) return false;
@@ -68,7 +74,7 @@
         return 0;
       });
       return rows;
-    }, [query, statusFilter, specFilter, openTodosOnly, sort, idsWithOpenTodos]);
+    }, [enriched, query, statusFilter, specFilter, openTodosOnly, sort, idsWithOpenTodos]);
 
     const STATUS_OPTS = [
       { key: 'all',     label: 'All',       color: pal.textSoft },
@@ -418,7 +424,8 @@
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>{c.name}</h1>
+            <EditableContractorName pal={pal} value={c.name}
+              onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { name: v })} />
             <SpecChip code={c.spec} size="lg" />
             <StatusPill status={c.status} />
           </div>
@@ -616,6 +623,71 @@
           {display ? value : placeholder}
         </span>
       </span>
+    );
+  }
+
+  // Editable contractor name (h1 in the header). Same click-to-edit pattern
+  // as EditableContactField but styled like a heading; refuses to save empty.
+  function EditableContractorName({ pal, value, onSave }) {
+    const [editing, setEditing] = React.useState(false);
+    const [draft, setDraft] = React.useState(value || '');
+    const inputRef = React.useRef(null);
+
+    React.useEffect(() => {
+      if (editing && inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.select();
+      }
+    }, [editing]);
+
+    const startEdit = () => { setDraft(value || ''); setEditing(true); };
+    const commit = () => {
+      const next = draft.trim();
+      if (!next) { setEditing(false); return; }   // never save blank
+      if (next !== (value || '').trim()) onSave(next);
+      setEditing(false);
+    };
+    const cancel = () => { setDraft(value || ''); setEditing(false); };
+    const onKey = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    };
+
+    if (editing) {
+      return (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={onKey}
+          style={{
+            margin: 0,
+            padding: '2px 6px',
+            fontSize: 22, fontWeight: 600, color: pal.text,
+            letterSpacing: -0.3,
+            background: pal.cardAlt,
+            border: `1px solid ${pal.accent}`, borderRadius: 6,
+            outline: 'none', fontFamily: 'inherit',
+            minWidth: 260,
+          }}
+        />
+      );
+    }
+    return (
+      <h1 onClick={startEdit}
+        title="Click to edit"
+        style={{
+          margin: 0,
+          fontSize: 22, fontWeight: 600, color: pal.text, letterSpacing: -0.3,
+          cursor: 'pointer',
+          borderBottom: `1px dashed transparent`,
+          paddingBottom: 1,
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.borderBottomColor = pal.borderSoft}
+        onMouseLeave={(e) => e.currentTarget.style.borderBottomColor = 'transparent'}>
+        {value || 'Unnamed contractor'}
+      </h1>
     );
   }
   function Kpi({ pal, label, value, sub, valueColor }) {

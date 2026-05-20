@@ -12,6 +12,7 @@ window.ContractorOverridesStore = (() => {
   function fromRow(r) {
     return {
       contractorId: r.contractor_id,
+      name: r.name || null,
       payRate: r.pay_rate != null ? Number(r.pay_rate) : null,
       billRate: r.bill_rate != null ? Number(r.bill_rate) : null,
       schedule: Array.isArray(r.schedule) ? r.schedule : null,
@@ -24,6 +25,7 @@ window.ContractorOverridesStore = (() => {
   function toRow(o) {
     return {
       contractor_id: o.contractorId,
+      name: o.name || null,
       pay_rate: o.payRate != null ? o.payRate : null,
       bill_rate: o.billRate != null ? o.billRate : null,
       schedule: o.schedule || null,
@@ -136,9 +138,36 @@ window.useContractorView = function useContractorView(c) {
       ...c,
       rates,
       schedule,
+      name:  o.name  != null ? o.name  : c.name,
       email: o.email != null ? o.email : c.email,
       phone: o.phone != null ? o.phone : c.phone,
       city:  o.city  != null ? o.city  : c.city,
     };
   }, [c, all]);
+};
+
+// Bulk view: returns the entire contractor array with overrides applied.
+// Used by the contractor list page so renames show up in the table.
+window.useContractorsView = function useContractorsView(contractors) {
+  const all = window.useContractorOverrides();
+  return React.useMemo(() => {
+    if (!Array.isArray(contractors)) return contractors;
+    return contractors.map((c) => {
+      const o = all[c.id];
+      if (!o) return c;
+      const rates = {
+        ...(c.rates || {}),
+        hourly: o.payRate  != null ? o.payRate  : (c.rates && c.rates.hourly),
+        bill:   o.billRate != null ? o.billRate : (c.rates && c.rates.bill),
+      };
+      return {
+        ...c,
+        rates,
+        name:  o.name  != null ? o.name  : c.name,
+        email: o.email != null ? o.email : c.email,
+        phone: o.phone != null ? o.phone : c.phone,
+        city:  o.city  != null ? o.city  : c.city,
+      };
+    });
+  }, [contractors, all]);
 };
