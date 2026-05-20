@@ -77,6 +77,23 @@ window.RenewalsStore = (() => {
       .select('*').order('expires_on', { ascending: true });
     if (error) { console.warn('renewals load failed', error); return; }
     setState((data || []).map(fromRow));
+    // After a fresh read, flip anything past-due-and-still-marked-active over
+    // to lapsed in the database. Realtime broadcasts the changes back to the
+    // open clients so all UIs stay consistent.
+    sweepLapsed();
+  }
+
+  async function sweepLapsed() {
+    if (!window.sb) return;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const todayIso = today.toISOString().slice(0, 10);
+    const stale = state.filter((r) =>
+      r.status === 'active' && r.expiresOn && r.expiresOn < todayIso);
+    if (stale.length === 0) return;
+    const ids = stale.map((r) => r.id);
+    const { error } = await window.sb.from(TABLE)
+      .update({ status: 'lapsed' }).in('id', ids);
+    if (error) console.warn('renewals sweep failed', error);
   }
 
   let channel = null;
@@ -140,6 +157,13 @@ window.RenewalsStore = (() => {
         createdAt: now, updatedAt: now,
         ...partial,
       };
+      // If they're logging a doc that's already expired, jump straight to
+      // lapsed — saves a manual click and matches what the sweep would do.
+      if (renewal.status === 'active' && renewal.expiresOn) {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const todayIso = today.toISOString().slice(0, 10);
+        if (renewal.expiresOn < todayIso) renewal.status = 'lapsed';
+      }
       setState([renewal, ...state].sort(byExpires));
       const row = toRow(renewal);
       const { error } = await window.sb.from(TABLE).insert(row);

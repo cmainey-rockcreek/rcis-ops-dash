@@ -19,7 +19,6 @@
     const renewals = window.useRenewals();
     const [query, setQuery] = React.useState('');
     const [kindFilter, setKindFilter] = React.useState('all'); // all|contractor|client
-    const [statusFilter, setStatusFilter] = React.useState('open'); // open|all
     const [editor, setEditor] = React.useState(null);
 
     // Group counts by urgency for the header tiles
@@ -40,7 +39,6 @@
           if (kindFilter === 'client')     return r.kind === 'client_contract';
           return true;
         })
-        .filter((r) => statusFilter === 'all' ? true : r.status !== 'lapsed')
         .filter((r) => {
           if (!q) return true;
           const owner = r.contractorName || r.schoolName || r.districtName || '';
@@ -56,7 +54,7 @@
           const bx = b.expiresOn || '9999-12-31';
           return ax.localeCompare(bx);
         });
-    }, [renewals, query, kindFilter, statusFilter]);
+    }, [renewals, query, kindFilter]);
 
     const counts = React.useMemo(() => ({
       all: renewals.length,
@@ -151,23 +149,6 @@
                 <span style={{ fontSize: 10, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
                   color: on ? pal.accent : pal.textFaint }}>{opt.count}</span>
               </button>
-            );
-          })}
-          <span style={{ width: 1, height: 14, background: pal.border, margin: '0 4px' }} />
-          {[
-            { key: 'open', label: 'Hide lapsed' },
-            { key: 'all',  label: 'Show all' },
-          ].map((opt) => {
-            const on = statusFilter === opt.key;
-            return (
-              <button key={opt.key} onClick={() => setStatusFilter(opt.key)} style={{
-                padding: '4px 10px', borderRadius: 999,
-                border: `1px solid ${on ? pal.accent : pal.border}`,
-                background: on ? pal.accentSoft : 'transparent',
-                color: on ? pal.accent : pal.textSoft,
-                fontSize: 11.5, fontWeight: on ? 600 : 500,
-                cursor: 'pointer', fontFamily: 'inherit',
-              }}>{opt.label}</button>
             );
           })}
         </div>
