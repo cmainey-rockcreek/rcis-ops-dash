@@ -7,9 +7,10 @@
   const { OwnerAvatar, Icon, teamMember } = window;
 
   const KINDS = [
-    { key: 'contractor_license',   label: 'Contractor license',   color: '#7A5AE0', needs: 'contractor', stateRequired: true  },
-    { key: 'contractor_insurance', label: 'Contractor insurance', color: '#1FA39A', needs: 'contractor', stateRequired: false },
-    { key: 'client_contract',      label: 'Client contract',      color: '#E76B5D', needs: 'client',     stateRequired: false },
+    { key: 'contractor_license',    label: 'License',           color: '#7A5AE0', needs: 'contractor', stateRequired: true  },
+    { key: 'contractor_insurance',  label: 'Insurance',         color: '#1FA39A', needs: 'contractor', stateRequired: false },
+    { key: 'contractor_background', label: 'Background check',  color: '#C98A2C', needs: 'contractor', stateRequired: false },
+    { key: 'client_contract',       label: 'Client contract',   color: '#E76B5D', needs: 'client',     stateRequired: false },
   ];
   const STATUSES = [
     { key: 'active',  label: 'Active',  color: '#3E8A57' },
@@ -277,8 +278,9 @@
             <div style={meta.needs === 'contractor' && meta.stateRequired ? styles.row : { display: 'block' }}>
               <div>
                 <div style={styles.label}>
-                  {draft.kind === 'contractor_license'   ? 'License (e.g. BCBA, RBT, SLP)'
-                   : draft.kind === 'contractor_insurance' ? 'Policy name'
+                  {draft.kind === 'contractor_license'    ? 'License (e.g. BCBA, RBT, SLP)'
+                   : draft.kind === 'contractor_insurance'  ? 'Policy name + carrier'
+                   : draft.kind === 'contractor_background' ? 'Background check type'
                    : 'Contract name (e.g. MSA, Year-3)'}
                 </div>
                 <input
@@ -286,8 +288,9 @@
                   value={draft.label}
                   onChange={(e) => set({ label: e.target.value })}
                   placeholder={
-                    draft.kind === 'contractor_license'   ? 'BCBA License'
-                    : draft.kind === 'contractor_insurance' ? 'Professional Liability'
+                    draft.kind === 'contractor_license'    ? 'BCBA License'
+                    : draft.kind === 'contractor_insurance'  ? 'Professional Liability — HPSO'
+                    : draft.kind === 'contractor_background' ? 'BIA fingerprint clearance'
                     : 'Service Agreement'
                   }
                   style={styles.input}
@@ -349,11 +352,14 @@
                 style={{ ...styles.input, padding: '9px 11px', resize: 'vertical', minHeight: 70 }} />
             </div>
 
-            {/* Attachments */}
+            {/* Attachments — passes the editor's apply-fields callback so a
+                PDF dropped here can prefill expiration / state / label. */}
             <RenewalAttachments
               attachments={draft.attachments}
               onChange={(next) => set({ attachments: next })}
               pal={pal}
+              draft={draft}
+              applyParsed={(patch) => set(patch)}
             />
           </div>
 
@@ -376,13 +382,15 @@
   }
 
   // ─── Attachments sub-component (mirrors GapAttachments) ──────────────────
-  function RenewalAttachments({ attachments, onChange, pal }) {
+  function RenewalAttachments({ attachments, onChange, pal, draft, applyParsed }) {
     const helpers = window.attachmentHelpers || {};
     const [adding, setAdding] = React.useState(false);
     const [url, setUrl] = React.useState('');
     const [name, setName] = React.useState('');
     const [uploading, setUploading] = React.useState(null);
     const [uploadError, setUploadError] = React.useState(null);
+    const [suggestion, setSuggestion] = React.useState(null);
+    const [parsing, setParsing] = React.useState(false);
     const urlRef = React.useRef(null);
     const fileInputRef = React.useRef(null);
 
@@ -421,6 +429,12 @@
       if (problem) { setUploadError(problem); return; }
       setUploading(file.name);
       setUploadError(null);
+      // Kick off PDF parsing in parallel with the upload. If the file isn't a
+      // PDF or parsing fails silently, no banner appears.
+      const parsePromise = (file.type === 'application/pdf' || /\.pdf$/i.test(file.name))
+        && window.parsePdfForRenewal
+        ? (setParsing(true), window.parsePdfForRenewal(file).catch(() => null))
+        : Promise.resolve(null);
       try {
         const attachment = await helpers.uploadAttachmentFile(file);
         onChange([...attachments, attachment]);
@@ -430,6 +444,21 @@
       } finally {
         setUploading(null);
       }
+      const parsed = await parsePromise;
+      setParsing(false);
+      if (parsed && (parsed.expiresOn || parsed.label || parsed.state)) {
+        setSuggestion({ ...parsed, sourceFile: file.name });
+      }
+    };
+
+    const applySuggestion = () => {
+      if (!suggestion || !applyParsed) { setSuggestion(null); return; }
+      const patch = {};
+      if (suggestion.expiresOn && !draft.expiresOn) patch.expiresOn = suggestion.expiresOn;
+      if (suggestion.state && !draft.state)         patch.state     = suggestion.state;
+      if (suggestion.label && !draft.label)         patch.label     = suggestion.label;
+      applyParsed(patch);
+      setSuggestion(null);
     };
 
     React.useEffect(() => {
@@ -594,6 +623,59 @@
               border: `1px solid ${pal.warn}`,
               borderRadius: 6, marginTop: 2,
             }}>{uploadError}</div>
+          )}
+
+          {parsing && (
+            <div style={{
+              fontSize: 11.5, color: pal.textSoft,
+              padding: '6px 10px',
+              border: `1px dashed ${pal.border}`, borderRadius: 6,
+              marginTop: 2,
+            }}>Reading document for license details…</div>
+          )}
+
+          {suggestion && (
+            <div style={{
+              padding: '10px 12px',
+              background: pal.accentSoft || (pal.accent + '12'),
+              border: `1px solid ${pal.accent}40`,
+              borderRadius: 8, marginTop: 2,
+              display: 'flex', flexDirection: 'column', gap: 6,
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.3,
+                textTransform: 'uppercase', color: pal.accent }}>
+                Suggested from {suggestion.sourceFile}
+              </div>
+              <div style={{ fontSize: 12.5, color: pal.text, lineHeight: 1.5 }}>
+                {suggestion.expiresOn && (<div><b>Expires:</b> {suggestion.expiresOn}</div>)}
+                {suggestion.state && (<div><b>State:</b> {suggestion.state}</div>)}
+                {suggestion.label && (<div><b>License / type:</b> {suggestion.label}</div>)}
+                {suggestion.licenseNumber && (<div><b>Number:</b> {suggestion.licenseNumber}</div>)}
+                {suggestion.confidence != null && (
+                  <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 3 }}>
+                    Confidence {Math.round(suggestion.confidence * 100)}% — please double-check.
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                <button onClick={applySuggestion}
+                  style={{
+                    padding: '6px 12px',
+                    background: pal.accent, color: '#fff',
+                    border: 'none', borderRadius: 6,
+                    fontSize: 12, fontWeight: 600,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}>Apply to form</button>
+                <button onClick={() => setSuggestion(null)}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'transparent', color: pal.textSoft,
+                    border: `1px solid ${pal.border}`, borderRadius: 6,
+                    fontSize: 12, fontWeight: 500,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}>Dismiss</button>
+              </div>
+            </div>
           )}
         </div>
       </div>

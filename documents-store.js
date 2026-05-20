@@ -1,9 +1,13 @@
 // DocumentsStore — Supabase-backed, keyed by (scope, scope_id).
 // Same pattern as TodosStore/ContactsStore: load on auth in, realtime,
 // optimistic updates + localStorage cache.
+//
+// Each row is either a link (url set) or an upload (storage_path set).
+// Uploads share the `task-attachments` bucket; we generate signed URLs
+// on the fly when the user clicks them.
 
 window.DocumentsStore = (() => {
-  const CACHE_KEY = 'rcis.docs.cache.v2';
+  const CACHE_KEY = 'rcis.docs.cache.v3';
   const TABLE = 'documents';
 
   function uid() {
@@ -12,14 +16,22 @@ window.DocumentsStore = (() => {
   function fromRow(r) {
     return {
       id: r.id, scope: r.scope, scopeId: r.scope_id,
-      kind: r.kind, url: r.url, name: r.name,
+      kind: r.kind, url: r.url || '', name: r.name,
+      storagePath: r.storage_path || null,
+      size: r.size != null ? Number(r.size) : null,
+      mime: r.mime || null,
+      source: r.source || 'link',
       addedAt: new Date(r.added_at).getTime(),
     };
   }
   function toRow(d) {
     return {
       id: d.id, scope: d.scope, scope_id: d.scopeId,
-      kind: d.kind, url: d.url, name: d.name,
+      kind: d.kind, url: d.url || null, name: d.name,
+      storage_path: d.storagePath || null,
+      size: d.size != null ? d.size : null,
+      mime: d.mime || null,
+      source: d.source || 'link',
     };
   }
 
@@ -83,17 +95,73 @@ window.DocumentsStore = (() => {
     },
 
     async add({ scope, scopeId, kind, url, name }) {
-      const d = { id: uid(), scope, scopeId, kind, url, name, addedAt: Date.now() };
+      const d = {
+        id: uid(), scope, scopeId,
+        kind, url, name,
+        storagePath: null, size: null, mime: null, source: 'link',
+        addedAt: Date.now(),
+      };
       setState([...state, d]);
       const { error } = await window.sb.from(TABLE).insert(toRow(d));
       if (error) console.warn('docs.add', error);
       return d;
     },
 
+    // Upload a file and create a documents row pointing at the storage path.
+    async addUpload({ scope, scopeId, file, name }) {
+      const helpers = window.attachmentHelpers;
+      if (!helpers || !helpers.uploadAttachmentFile) {
+        throw new Error('Upload helpers not loaded.');
+      }
+      const problem = helpers.validateUpload ? helpers.validateUpload(file) : null;
+      if (problem) throw new Error(problem);
+      // uploadAttachmentFile returns an attachment-shaped object with
+      // { id, kind, name, storagePath, size, mime, addedAt, source: 'upload' }
+      const att = await helpers.uploadAttachmentFile(file);
+      const d = {
+        id: uid(),
+        scope, scopeId,
+        kind: att.kind,
+        url: null,
+        name: (name || att.name).trim() || att.name,
+        storagePath: att.storagePath,
+        size: att.size,
+        mime: att.mime,
+        source: 'upload',
+        addedAt: Date.now(),
+      };
+      setState([...state, d]);
+      const { error } = await window.sb.from(TABLE).insert(toRow(d));
+      if (error) {
+        console.warn('docs.addUpload', error);
+        // best-effort: leave the file in storage so a retry can resume.
+      }
+      return d;
+    },
+
     async remove(id) {
+      const existing = state.find((d) => d.id === id);
       setState(state.filter((d) => d.id !== id));
       const { error } = await window.sb.from(TABLE).delete().eq('id', id);
       if (error) console.warn('docs.remove', error);
+      if (existing && existing.storagePath && window.attachmentHelpers &&
+          window.attachmentHelpers.deleteAttachmentFile) {
+        await window.attachmentHelpers.deleteAttachmentFile({
+          storagePath: existing.storagePath,
+        });
+      }
+    },
+
+    // Helper for an upload-flavored doc — generates a signed URL via the
+    // shared attachment helpers and opens it.
+    async open(doc) {
+      if (doc.source === 'upload' && doc.storagePath) {
+        if (window.attachmentHelpers && window.attachmentHelpers.openUploadedAttachment) {
+          await window.attachmentHelpers.openUploadedAttachment(doc);
+          return;
+        }
+      }
+      if (doc.url) window.open(doc.url, '_blank', 'noreferrer');
     },
 
     reload: load,

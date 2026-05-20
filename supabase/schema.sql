@@ -87,7 +87,7 @@ create index if not exists gap_comments_author_idx on public.gap_comments (autho
 -- Owner is exactly one of contractor_id, school_id, district_id (enforced in app).
 create table if not exists public.renewals (
   id             text primary key,
-  kind           text not null check (kind in ('contractor_license','contractor_insurance','client_contract')),
+  kind           text not null check (kind in ('contractor_license','contractor_insurance','contractor_background','client_contract')),
   contractor_id  text,
   contractor_name text,
   school_id      text,
@@ -137,14 +137,23 @@ create table if not exists public.contacts (
 create index if not exists contacts_name_idx on public.contacts (name);
 
 -- ─── documents ────────────────────────────────────────────────────────────
--- Attached to a district / school / (later) contractor.
+-- Attached to a district / school / contractor.
+-- Two flavors:
+--   • Link docs        → url set, storage_path null,  source='link'
+--   • Uploaded docs    → url null, storage_path set,  source='upload'
+-- Uploads live in the same `task-attachments` Supabase Storage bucket as
+-- task/renewal attachments and stream via signed URLs on click.
 create table if not exists public.documents (
   id            text primary key,
   scope         text not null check (scope in ('district','school','contractor')),
   scope_id      text not null,
   kind          text not null default 'link',
-  url           text not null,
+  url           text,
   name          text not null,
+  storage_path  text,
+  size          bigint,
+  mime          text,
+  source        text default 'link',
   added_at      timestamptz not null default now()
 );
 create index if not exists documents_scope_idx on public.documents (scope, scope_id);

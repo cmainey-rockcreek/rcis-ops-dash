@@ -357,7 +357,12 @@
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
             <LinkedTodosCard c={c} pal={pal} />
-            <LicensesCard c={c} pal={pal} />
+            <ContractorRenewalsCard c={c} pal={pal} kind="contractor_license"
+              title="Licenses" addLabel="+ Add license" />
+            <ContractorRenewalsCard c={c} pal={pal} kind="contractor_insurance"
+              title="Liability insurance" addLabel="+ Add policy" />
+            <ContractorRenewalsCard c={c} pal={pal} kind="contractor_background"
+              title="Background check" addLabel="+ Add" />
             <DocumentsCard c={c} pal={pal} />
             <NotesCard c={c} pal={pal} />
           </div>
@@ -664,46 +669,125 @@
     );
   }
 
-  // Licenses
-  function LicensesCard({ c, pal }) {
+  // Contractor renewals — one card per kind (license / insurance / background)
+  // backed by RenewalsStore. Rows are clickable to edit; "+ Add" opens the
+  // editor pre-filled with this contractor + the chosen kind.
+  function ContractorRenewalsCard({ c, pal, kind, title, addLabel }) {
+    const renewals = window.useRenewals ? window.useRenewals() : [];
+    const rows = React.useMemo(() => {
+      return renewals
+        .filter((r) => r.contractorId === c.id && r.kind === kind)
+        .sort((a, b) => {
+          const ax = a.expiresOn || '9999-12-31';
+          const bx = b.expiresOn || '9999-12-31';
+          return ax.localeCompare(bx);
+        });
+    }, [renewals, c.id, kind]);
+
+    const [editor, setEditor] = React.useState(null);
+    const openNew = () => setEditor({
+      isNew: true,
+      renewal: {
+        kind,
+        contractorId: c.id,
+        contractorName: c.name,
+        state: kind === 'contractor_license' ? ((c.states || [])[0] || '') : '',
+      },
+    });
+    const openEdit = (r) => setEditor({ isNew: false, renewal: { ...r } });
+    const close = () => setEditor(null);
+    const save = async (patch) => {
+      if (editor.isNew) {
+        const { id, ...rest } = patch;
+        await window.RenewalsStore.add(rest);
+      } else {
+        await window.RenewalsStore.update(editor.renewal.id, patch);
+      }
+      close();
+    };
+    const del = async () => {
+      await window.RenewalsStore.remove(editor.renewal.id);
+      close();
+    };
+
+    const addBtn = (
+      <button onClick={openNew} style={{
+        background: 'transparent', border: 'none',
+        color: pal.accent, fontSize: 12, fontWeight: 600,
+        cursor: 'pointer', fontFamily: 'inherit', padding: 0,
+      }}>{addLabel}</button>
+    );
+
     return (
-      <Section pal={pal} title="Licenses" badge={c.licenses.length} action="+ Add license">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {c.licenses.map((lic, i) => {
-            const days = daysUntil(lic.expires);
-            const tone = days < 30 ? pal.warn : days < 90 ? '#C98A2C' : pal.textSoft;
-            return (
-              <div key={i} style={{
-                display: 'grid',
-                gridTemplateColumns: '40px 1fr auto',
-                gap: 10, alignItems: 'center',
-                padding: '8px 0',
-                borderBottom: i < c.licenses.length - 1 ? `1px solid ${pal.borderSoft}` : 'none',
-                fontSize: 12.5,
-              }}>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, color: pal.text,
-                  fontFamily: 'ui-monospace, monospace',
-                  background: pal.chipBg, padding: '3px 7px', borderRadius: 4, textAlign: 'center',
-                }}>{lic.state}</span>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ color: pal.text, fontWeight: 500 }}>{lic.kind}</div>
-                  <div style={{ fontSize: 11, color: pal.textFaint,
-                    fontFamily: 'ui-monospace, monospace', marginTop: 1 }}>{lic.number}</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 11.5, color: tone, fontWeight: 600 }}>
-                    {days < 0 ? 'Expired' : `${days}d`}
-                  </div>
-                  <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>
-                    {formatDate(lic.expires)}
-                  </div>
-                </div>
+      <>
+        <Section pal={pal} title={title} badge={rows.length} action={addBtn}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {rows.length === 0 && (
+              <div style={{ fontSize: 12, color: pal.textFaint, fontStyle: 'italic',
+                padding: '4px 0' }}>
+                None tracked yet.
               </div>
-            );
-          })}
-        </div>
-      </Section>
+            )}
+            {rows.map((r, i) => {
+              const days = window.daysUntilRenewal(r.expiresOn);
+              const tone = days == null ? pal.textSoft
+                         : days < 0    ? '#E76B5D'
+                         : days < 30   ? '#C98A2C'
+                         : days < 60   ? pal.accent
+                                       : pal.textSoft;
+              const dateLabel = r.expiresOn ? formatDate(r.expiresOn) : '—';
+              const daysLabel = days == null ? '—'
+                              : days < 0    ? `${Math.abs(days)}d over`
+                              : days === 0  ? 'today'
+                              : `${days}d`;
+              return (
+                <button key={r.id} onClick={() => openEdit(r)} style={{
+                  display: 'grid',
+                  gridTemplateColumns: r.state ? '40px 1fr auto' : '1fr auto',
+                  gap: 10, alignItems: 'center',
+                  padding: '8px 0',
+                  borderBottom: i < rows.length - 1 ? `1px solid ${pal.borderSoft}` : 'none',
+                  fontSize: 12.5, textAlign: 'left',
+                  background: 'transparent', border: 'none', width: '100%',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                  {r.state && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, color: pal.text,
+                      fontFamily: 'ui-monospace, monospace',
+                      background: pal.chipBg, padding: '3px 7px', borderRadius: 4, textAlign: 'center',
+                    }}>{r.state}</span>
+                  )}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: pal.text, fontWeight: 500,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {r.label || (kind === 'contractor_license' ? 'License' : kind === 'contractor_insurance' ? 'Policy' : 'Background check')}
+                    </div>
+                    {(r.status && r.status !== 'active') && (
+                      <div style={{ fontSize: 11, color: pal.textFaint, marginTop: 1,
+                        textTransform: 'capitalize' }}>{r.status}</div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11.5, color: tone, fontWeight: 600 }}>{daysLabel}</div>
+                    <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>{dateLabel}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+        {editor && (
+          <window.RenewalEditor
+            renewal={editor.renewal}
+            pal={pal}
+            isNew={editor.isNew}
+            onSave={save}
+            onDelete={del}
+            onClose={close}
+          />
+        )}
+      </>
     );
   }
 
@@ -769,23 +853,214 @@
     );
   }
 
-  // Documents (reuses the attachment-kind meta)
+  // Documents — backed by DocumentsStore. Supports both link adds and real
+  // file uploads to the task-attachments bucket via window.attachmentHelpers.
+  // When a PDF is uploaded, we run pdf-parse on it; if it looks like a license
+  // / insurance / background check, we offer to log a renewal from it.
   function DocumentsCard({ c, pal }) {
-    const kindMeta = window.attachmentKindMeta;
+    const helpers = window.attachmentHelpers || {};
+    const docs = window.useDocuments ? window.useDocuments('contractor', c.id) : [];
+    const sorted = React.useMemo(() => [...docs].sort((a, b) => b.addedAt - a.addedAt), [docs]);
+    const [adding, setAdding] = React.useState(false);
+    const [url, setUrl] = React.useState('');
+    const [name, setName] = React.useState('');
+    const [uploading, setUploading] = React.useState(null);
+    const [parsing, setParsing] = React.useState(false);
+    const [error, setError] = React.useState(null);
+    const [renewalPrompt, setRenewalPrompt] = React.useState(null);
+    const [renewalEditor, setRenewalEditor] = React.useState(null);
+    const fileInputRef = React.useRef(null);
+
+    const KIND_META = helpers.KIND_META || {};
+
+    const resetLink = () => { setAdding(false); setUrl(''); setName(''); };
+    const commitLink = async () => {
+      const trimmed = url.trim();
+      if (!trimmed) return;
+      const finalName = name.trim() || (helpers.defaultAttachmentName ? helpers.defaultAttachmentName(trimmed) : trimmed);
+      const kind = helpers.detectAttachmentKind ? helpers.detectAttachmentKind(trimmed, finalName) : 'link';
+      await window.DocumentsStore.add({
+        scope: 'contractor', scopeId: c.id, kind, url: trimmed, name: finalName,
+      });
+      resetLink();
+    };
+
+    const triggerFilePicker = () => {
+      setError(null);
+      if (fileInputRef.current) fileInputRef.current.click();
+    };
+    const onFileSelected = async (event) => {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = '';
+      if (!file) return;
+      setUploading(file.name);
+      setError(null);
+      // Parallel: run the PDF parser (if applicable) while the upload happens.
+      const parsePromise = (file.type === 'application/pdf' || /\.pdf$/i.test(file.name))
+        && window.parsePdfForRenewal
+        ? (setParsing(true), window.parsePdfForRenewal(file).catch(() => null))
+        : Promise.resolve(null);
+      let uploadedDoc = null;
+      try {
+        uploadedDoc = await window.DocumentsStore.addUpload({
+          scope: 'contractor', scopeId: c.id, file,
+        });
+      } catch (err) {
+        console.warn('doc upload failed', err);
+        setError((err && err.message) ? err.message : 'Upload failed.');
+      } finally {
+        setUploading(null);
+      }
+      const parsed = await parsePromise;
+      setParsing(false);
+      // Only show the prompt if we found at least an expiration date — that's
+      // the actionable signal. Other fields without a date are noise.
+      if (parsed && parsed.expiresOn) {
+        setRenewalPrompt({ ...parsed, sourceFile: file.name, uploadedDoc });
+      }
+    };
+
+    // When user accepts the prompt, open the renewal editor pre-filled with
+    // extracted fields AND the just-uploaded document as the first attachment.
+    const acceptRenewalPrompt = () => {
+      if (!renewalPrompt) return;
+      // Guess kind from label keywords; default to license.
+      const lab = (renewalPrompt.label || '').toLowerCase();
+      let kind = 'contractor_license';
+      if (/liability|malpractice|insurance|hpso|cmf/.test(lab)) kind = 'contractor_insurance';
+      else if (/background|fingerprint|bia|clearance/.test(lab)) kind = 'contractor_background';
+
+      // Re-shape the uploaded doc into an attachment row the renewal can use.
+      const att = renewalPrompt.uploadedDoc ? [{
+        id: (window.attachmentHelpers && window.attachmentHelpers.attachmentId)
+              ? window.attachmentHelpers.attachmentId() : 'a' + Date.now(),
+        kind: renewalPrompt.uploadedDoc.kind,
+        name: renewalPrompt.uploadedDoc.name,
+        storagePath: renewalPrompt.uploadedDoc.storagePath,
+        size: renewalPrompt.uploadedDoc.size,
+        mime: renewalPrompt.uploadedDoc.mime,
+        source: 'upload',
+        addedAt: Date.now(),
+      }] : [];
+
+      setRenewalEditor({
+        isNew: true,
+        renewal: {
+          kind,
+          contractorId: c.id,
+          contractorName: c.name,
+          state: renewalPrompt.state || (kind === 'contractor_license' ? ((c.states || [])[0] || '') : ''),
+          label: renewalPrompt.label || '',
+          expiresOn: renewalPrompt.expiresOn || '',
+          attachments: att,
+        },
+      });
+      setRenewalPrompt(null);
+    };
+    const dismissRenewalPrompt = () => setRenewalPrompt(null);
+    const closeRenewalEditor = () => setRenewalEditor(null);
+    const saveRenewalEditor = async (patch) => {
+      const { id, ...rest } = patch;
+      await window.RenewalsStore.add(rest);
+      closeRenewalEditor();
+    };
+    const deleteRenewalEditor = async () => {
+      if (renewalEditor && renewalEditor.renewal && renewalEditor.renewal.id) {
+        await window.RenewalsStore.remove(renewalEditor.renewal.id);
+      }
+      closeRenewalEditor();
+    };
+
+    const removeDoc = async (d) => {
+      if (!confirm(`Delete "${d.name}"?`)) return;
+      await window.DocumentsStore.remove(d.id);
+    };
+
+    const actionBtn = (
+      <button onClick={triggerFilePicker} disabled={!!uploading} style={{
+        background: 'transparent', border: 'none',
+        color: pal.accent, fontSize: 12, fontWeight: 600,
+        cursor: uploading ? 'default' : 'pointer', fontFamily: 'inherit', padding: 0,
+      }}>{uploading ? `Uploading…` : '+ Upload'}</button>
+    );
+
     return (
-      <Section pal={pal} title="Documents" badge={c.documents.length} action="+ Add doc">
+      <>
+      <Section pal={pal} title="Documents" badge={sorted.length} action={actionBtn}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {c.documents.map((d) => {
-            const meta = kindMeta ? kindMeta(d.kind) : { abbr: 'FILE', full: 'File', color: pal.textSoft };
+          {parsing && (
+            <div style={{
+              fontSize: 11.5, color: pal.textSoft,
+              padding: '6px 10px',
+              border: `1px dashed ${pal.border}`, borderRadius: 6,
+            }}>Reading document for renewal details…</div>
+          )}
+
+          {renewalPrompt && (
+            <div style={{
+              padding: '10px 12px',
+              background: pal.accentSoft || (pal.accent + '12'),
+              border: `1px solid ${pal.accent}40`,
+              borderRadius: 8,
+              display: 'flex', flexDirection: 'column', gap: 6,
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.3,
+                textTransform: 'uppercase', color: pal.accent }}>
+                Looks like a renewal — log it?
+              </div>
+              <div style={{ fontSize: 12.5, color: pal.text, lineHeight: 1.5 }}>
+                {renewalPrompt.expiresOn && (<div><b>Expires:</b> {renewalPrompt.expiresOn}</div>)}
+                {renewalPrompt.state && (<div><b>State:</b> {renewalPrompt.state}</div>)}
+                {renewalPrompt.label && (<div><b>License / type:</b> {renewalPrompt.label}</div>)}
+                {renewalPrompt.licenseNumber && (<div><b>Number:</b> {renewalPrompt.licenseNumber}</div>)}
+                <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 3 }}>
+                  Extracted from {renewalPrompt.sourceFile}. Confidence {Math.round((renewalPrompt.confidence || 0) * 100)}%.
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                <button onClick={acceptRenewalPrompt}
+                  style={{
+                    padding: '6px 12px',
+                    background: pal.accent, color: '#fff',
+                    border: 'none', borderRadius: 6,
+                    fontSize: 12, fontWeight: 600,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}>Log renewal</button>
+                <button onClick={dismissRenewalPrompt}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'transparent', color: pal.textSoft,
+                    border: `1px solid ${pal.border}`, borderRadius: 6,
+                    fontSize: 12, fontWeight: 500,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}>Not a renewal</button>
+              </div>
+            </div>
+          )}
+
+          {sorted.length === 0 && !adding && (
+            <div style={{ fontSize: 12, color: pal.textFaint, fontStyle: 'italic',
+              padding: '4px 0' }}>
+              No documents yet. Upload a PDF or paste a share link.
+            </div>
+          )}
+          {sorted.map((d) => {
+            const meta = KIND_META[d.kind] || { abbr: 'FILE', full: 'File', color: pal.textSoft };
+            const isUpload = d.source === 'upload';
+            const sub = isUpload
+              ? `${meta.full} · ${helpers.formatBytes ? helpers.formatBytes(d.size) : ''} · added ${formatDate(new Date(d.addedAt).toISOString().slice(0, 10))}`
+              : `${meta.full} · added ${formatDate(new Date(d.addedAt).toISOString().slice(0, 10))}`;
+            const open = (e) => {
+              e.preventDefault();
+              window.DocumentsStore.open(d);
+            };
             return (
-              <a key={d.id} href={d.url} target="_blank" rel="noreferrer"
-                 style={{
-                   display: 'flex', alignItems: 'center', gap: 10,
-                   padding: '7px 10px',
-                   background: pal.cardAlt,
-                   border: `1px solid ${pal.borderSoft}`, borderRadius: 7,
-                   textDecoration: 'none', color: 'inherit',
-                 }}>
+              <div key={d.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '7px 10px',
+                background: pal.cardAlt,
+                border: `1px solid ${pal.borderSoft}`, borderRadius: 7,
+              }}>
                 <span style={{
                   flexShrink: 0,
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -795,17 +1070,117 @@
                   borderRadius: 4, fontFamily: 'ui-monospace, monospace',
                 }}>{meta.abbr}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, color: pal.text, fontWeight: 500,
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</div>
-                  <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 1 }}>
-                    {meta.full} · added {formatDate(new Date(d.addedAt).toISOString().slice(0, 10))}
-                  </div>
+                  <a href={d.url || '#'} onClick={open} style={{
+                    fontSize: 12.5, color: pal.text, fontWeight: 500,
+                    textDecoration: 'none', display: 'block',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>{d.name}</a>
+                  <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 1,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>
                 </div>
-              </a>
+                <button onClick={() => removeDoc(d)} title="Delete document"
+                  style={{
+                    border: 'none', background: 'transparent',
+                    color: pal.textFaint, fontSize: 16, lineHeight: 1,
+                    cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = pal.warn; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = pal.textFaint; }}>×</button>
+              </div>
             );
           })}
+
+          {adding && (
+            <div style={{
+              padding: 10, background: pal.cardAlt,
+              border: `1px dashed ${pal.border}`, borderRadius: 7,
+              display: 'flex', flexDirection: 'column', gap: 7,
+            }}>
+              <input autoFocus
+                placeholder="Paste URL — Google Doc, Drive, Dropbox…"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitLink(); } if (e.key === 'Escape') resetLink(); }}
+                style={{
+                  width: '100%', padding: '7px 10px',
+                  fontSize: 12.5, color: pal.text, background: pal.card,
+                  border: `1px solid ${pal.border}`, borderRadius: 6,
+                  outline: 'none', fontFamily: 'inherit',
+                }}
+              />
+              <div style={{ display: 'flex', gap: 7 }}>
+                <input
+                  placeholder="Display name (optional)"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitLink(); } if (e.key === 'Escape') resetLink(); }}
+                  style={{
+                    flex: 1, padding: '7px 10px',
+                    fontSize: 12.5, color: pal.text, background: pal.card,
+                    border: `1px solid ${pal.border}`, borderRadius: 6,
+                    outline: 'none', fontFamily: 'inherit',
+                  }}
+                />
+                <button onClick={resetLink}
+                  style={{
+                    padding: '0 12px',
+                    background: 'transparent', color: pal.textSoft,
+                    border: `1px solid ${pal.border}`, borderRadius: 6,
+                    fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+                  }}>Cancel</button>
+                <button onClick={commitLink} disabled={!url.trim()}
+                  style={{
+                    padding: '0 14px',
+                    background: url.trim() ? pal.accent : pal.chipBg,
+                    color: url.trim() ? '#fff' : pal.textFaint,
+                    border: 'none', borderRadius: 6,
+                    fontSize: 12, fontWeight: 600,
+                    cursor: url.trim() ? 'pointer' : 'default', fontFamily: 'inherit',
+                  }}>Add link</button>
+              </div>
+            </div>
+          )}
+
+          {!adding && (
+            <button onClick={() => setAdding(true)} style={{
+              padding: '6px 10px',
+              background: 'transparent', color: pal.textSoft,
+              border: `1px dashed ${pal.border}`, borderRadius: 7,
+              fontSize: 11.5, fontWeight: 500,
+              cursor: 'pointer', fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+            }}>+ Add link instead</button>
+          )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={helpers.UPLOAD_ACCEPT || '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt'}
+            onChange={onFileSelected}
+            style={{ display: 'none' }}
+          />
+          {error && (
+            <div style={{
+              fontSize: 11.5, color: pal.warn,
+              padding: '6px 10px',
+              border: `1px solid ${pal.warn}`, borderRadius: 6,
+              marginTop: 2,
+            }}>{error}</div>
+          )}
         </div>
       </Section>
+
+      {renewalEditor && (
+        <window.RenewalEditor
+          renewal={renewalEditor.renewal}
+          pal={pal}
+          isNew={renewalEditor.isNew}
+          onSave={saveRenewalEditor}
+          onDelete={deleteRenewalEditor}
+          onClose={closeRenewalEditor}
+        />
+      )}
+      </>
     );
   }
 

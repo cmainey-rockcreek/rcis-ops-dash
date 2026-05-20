@@ -317,9 +317,10 @@
   }
 
   function shortKind(k) {
-    if (k === 'contractor_license')   return 'License';
-    if (k === 'contractor_insurance') return 'Insurance';
-    if (k === 'client_contract')      return 'Contract';
+    if (k === 'contractor_license')    return 'License';
+    if (k === 'contractor_insurance')  return 'Insurance';
+    if (k === 'contractor_background') return 'Background';
+    if (k === 'client_contract')       return 'Contract';
     return k;
   }
   function formatDate(iso) {

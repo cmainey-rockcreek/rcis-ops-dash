@@ -520,12 +520,20 @@
   // ─── Renewals ─────────────────────────────────────────────────────────────
   function Renewals({ pal }) {
     const all = window.useRenewals ? window.useRenewals() : [];
+    // Only show what's actually urgent — anything past 60 days out is noise
+    // on the home dashboard. Use the renewals page for the full list.
     const open = React.useMemo(
-      () => all.filter((r) => r.status !== 'lapsed').sort((a, b) => {
-        const ax = a.expiresOn || '9999-12-31';
-        const bx = b.expiresOn || '9999-12-31';
-        return ax.localeCompare(bx);
-      }),
+      () => all
+        .filter((r) => r.status !== 'lapsed')
+        .filter((r) => {
+          const u = window.renewalUrgency && window.renewalUrgency(r.expiresOn);
+          return u === 'overdue' || u === 'soon' || u === 'upcoming';
+        })
+        .sort((a, b) => {
+          const ax = a.expiresOn || '9999-12-31';
+          const bx = b.expiresOn || '9999-12-31';
+          return ax.localeCompare(bx);
+        }),
       [all],
     );
     const rows = open.slice(0, 5);
@@ -561,7 +569,9 @@
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {rows.length === 0 && (
               <div style={{ padding: '14px 4px', fontSize: 12, color: pal.textFaint }}>
-                Nothing tracked yet. Log a license, policy, or contract to get started.
+                {all.length === 0
+                  ? 'Nothing tracked yet. Log a license, policy, or contract to get started.'
+                  : 'Nothing due in the next 60 days — quiet stretch.'}
               </div>
             )}
             {rows.map((r, i) => {
@@ -623,9 +633,10 @@
     );
   }
   function shortRenewalKind(k) {
-    if (k === 'contractor_license')   return 'License';
-    if (k === 'contractor_insurance') return 'Insurance';
-    if (k === 'client_contract')      return 'Contract';
+    if (k === 'contractor_license')    return 'License';
+    if (k === 'contractor_insurance')  return 'Insurance';
+    if (k === 'contractor_background') return 'Background';
+    if (k === 'client_contract')       return 'Contract';
     return k;
   }
 
