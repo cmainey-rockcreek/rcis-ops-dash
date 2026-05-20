@@ -136,7 +136,6 @@
 
   // ─── Sidebar ──────────────────────────────────────────────────────────────
   function CalmSidebar({ pal, activePage }) {
-    const { SPECIALTIES, DISTRICTS } = window.RCIS_DATA;
     // Subscribe to renewals so the sidebar badge updates live with the store.
     const renewals = window.useRenewals ? window.useRenewals() : [];
     const renewalsBadge = React.useMemo(() => {
@@ -190,63 +189,6 @@
               </window.Link>
             );
           })}
-        </div>
-
-        <div>
-          <div style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: 0.8,
-            color: pal.railTextFaint, textTransform: 'uppercase',
-            padding: '0 10px 8px',
-          }}>Filter by district</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {DISTRICTS.map((d) => (
-              <div key={d.id} style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '5px 10px', borderRadius: 6,
-                fontSize: 12, color: pal.railTextSoft,
-              }}>
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  width: 14, height: 14, border: `1px solid ${pal.railBorder}`, borderRadius: 3,
-                  background: pal.railChipBg, flexShrink: 0,
-                }} />
-                <span style={{
-                  flex: 1, minWidth: 0,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>{d.name}</span>
-                <span style={{
-                  color: pal.railTextFaint, fontSize: 10.5,
-                  fontVariantNumeric: 'tabular-nums', flexShrink: 0,
-                }}>{d.schools}</span>
-              </div>
-            ))}
-            <div style={{
-              padding: '4px 10px', fontSize: 11, color: pal.railTextFaint,
-              cursor: 'pointer', marginTop: 2,
-            }}>+ 4 more…</div>
-          </div>
-        </div>
-
-        <div>
-          <div style={{
-            fontSize: 10, fontWeight: 700, letterSpacing: 0.8,
-            color: pal.railTextFaint, textTransform: 'uppercase',
-            padding: '0 10px 8px',
-          }}>Specialty</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, padding: '0 8px' }}>
-            {SPECIALTIES.map((s) => (
-              <span key={s.code} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 5,
-                padding: '3px 8px', borderRadius: 999,
-                background: pal.railChipBg,
-                color: pal.railTextSoft,
-                fontSize: 11, fontWeight: 500,
-              }}>
-                <span style={{ width: 7, height: 7, borderRadius: 4, background: s.color }} />
-                {s.code}
-              </span>
-            ))}
-          </div>
         </div>
 
         <div style={{
