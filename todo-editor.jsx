@@ -193,7 +193,8 @@
       const out = [];
       const q = linkQuery.trim().toLowerCase();
       const match = (s) => !q || s.toLowerCase().includes(q);
-      window.RCIS_DATA.CONTRACTORS.forEach((c) => {
+      window.RCIS_DATA.CONTRACTORS.forEach((raw) => {
+        const c = window.applyContractorOverride ? window.applyContractorOverride(raw) : raw;
         if (match(c.name) || match(c.spec)) out.push({ type: 'contractor', id: c.id, name: c.name, sub: c.spec });
       });
       window.RCIS_DATA.SCHOOLS.forEach((s) => {

@@ -73,7 +73,11 @@
       const match = (s) => !q || (s || '').toLowerCase().includes(q);
       const out = [];
       if (meta.needs === 'contractor') {
-        const contractors = (window.RCIS_DATA && window.RCIS_DATA.CONTRACTORS) || [];
+        const raw = (window.RCIS_DATA && window.RCIS_DATA.CONTRACTORS) || [];
+        // Apply name/contact overrides synchronously so picker results reflect renames.
+        const contractors = window.applyContractorOverride
+          ? raw.map((c) => window.applyContractorOverride(c))
+          : raw;
         contractors.forEach((c) => {
           const sub = [c.spec, (c.states || []).slice(0, 3).join(', ')].filter(Boolean).join(' · ');
           if (match(c.name) || match(c.spec) || match((c.states || []).join(' '))) {

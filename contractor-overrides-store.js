@@ -146,6 +146,45 @@ window.useContractorView = function useContractorView(c) {
   }, [c, all]);
 };
 
+// Synchronous helpers — usable outside React (e.g. inside useMemo bodies
+// that already subscribe via useContractorOverrides). Returns the contractor
+// with name + contact + rate overrides applied, falling back to mock.
+window.applyContractorOverride = function applyContractorOverride(c, overridesMap) {
+  if (!c) return c;
+  const all = overridesMap || (window.ContractorOverridesStore && window.ContractorOverridesStore.get()) || {};
+  const o = all[c.id];
+  if (!o) return c;
+  const rates = {
+    ...(c.rates || {}),
+    hourly: o.payRate  != null ? o.payRate  : (c.rates && c.rates.hourly),
+    bill:   o.billRate != null ? o.billRate : (c.rates && c.rates.bill),
+  };
+  return {
+    ...c,
+    rates,
+    name:  o.name  != null ? o.name  : c.name,
+    email: o.email != null ? o.email : c.email,
+    phone: o.phone != null ? o.phone : c.phone,
+    city:  o.city  != null ? o.city  : c.city,
+  };
+};
+
+// Drop-in for window.getContractor that applies the override layer. Safe to
+// call any time after both data-contractors.js and contractor-overrides-store.js
+// have loaded. Returns null if the contractor doesn't exist.
+window.getContractorEnriched = function getContractorEnriched(id) {
+  const base = window.getContractor && window.getContractor(id);
+  if (!base) return null;
+  return window.applyContractorOverride(base);
+};
+
+// Live name lookup. Returns null if the contractor doesn't exist; the caller
+// is expected to fall back to whatever stored snapshot it has.
+window.contractorDisplayName = function contractorDisplayName(id) {
+  const c = window.getContractorEnriched && window.getContractorEnriched(id);
+  return c ? c.name : null;
+};
+
 // Bulk view: returns the entire contractor array with overrides applied.
 // Used by the contractor list page so renames show up in the table.
 window.useContractorsView = function useContractorsView(contractors) {

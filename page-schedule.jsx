@@ -250,7 +250,11 @@
   function ScheduleWorkspace({ pal }) {
     const allGaps = window.useCoverageGaps ? window.useCoverageGaps() : [];
     const gaps = React.useMemo(() => allGaps.filter((g) => g.status === 'open'), [allGaps]);
-    const contractors = window.RCIS_DATA.CONTRACTORS;
+    // Wrap contractors through the overrides view so renames/contact edits
+    // show up in the Matchmaker rows the moment they save.
+    const contractors = window.useContractorsView
+      ? window.useContractorsView(window.RCIS_DATA.CONTRACTORS)
+      : window.RCIS_DATA.CONTRACTORS;
 
     const [selectedGapId, setSelectedGapId] = React.useState(null);
     const [selectedContractorId, setSelectedContractorId] = React.useState(null);

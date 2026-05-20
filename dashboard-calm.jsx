@@ -176,7 +176,11 @@
 
   // ─── Capacity now ─────────────────────────────────────────────────────────
   function CapacityNow({ pal }) {
-    const list = window.RCIS_DATA.CONTRACTORS
+    // Subscribe to overrides so renamed contractors show their new name here.
+    const enriched = window.useContractorsView
+      ? window.useContractorsView(window.RCIS_DATA.CONTRACTORS)
+      : window.RCIS_DATA.CONTRACTORS;
+    const list = enriched
       .filter(c => c.status === 'avail' || c.status === 'partial')
       .slice(0, 6);
     return (
@@ -224,6 +228,8 @@
     const TodoEditor = window.TodoEditor;
     const todos = window.useTodos();
     const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
+    // Re-render when a contractor name changes so linked-task chips update.
+    if (window.useContractorOverrides) window.useContractorOverrides();
     const [editor, setEditor] = React.useState(null); // { todo, isNew } | null
     const [dragId, setDragId] = React.useState(null);
     const [dragOver, setDragOver] = React.useState(null);
@@ -450,7 +456,10 @@
             maxWidth: '100%',
           }}>
             <LinkTypeBadge type={todo.linkedTo.type} pal={pal} />
-            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{todo.linkedTo.name}</span>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {(todo.linkedTo.type === 'contractor' && window.contractorDisplayName
+                ? window.contractorDisplayName(todo.linkedTo.id) : null) || todo.linkedTo.name}
+            </span>
           </div>
         )}
 
@@ -520,6 +529,9 @@
   // ─── Renewals ─────────────────────────────────────────────────────────────
   function Renewals({ pal }) {
     const all = window.useRenewals ? window.useRenewals() : [];
+    // Subscribe to overrides so the widget re-renders when a contractor name
+    // changes — the row labels resolve through contractorDisplayName below.
+    if (window.useContractorOverrides) window.useContractorOverrides();
     // Only show what's actually urgent — anything past 60 days out is noise
     // on the home dashboard. Use the renewals page for the full list.
     const open = React.useMemo(
@@ -581,7 +593,11 @@
               const urgentColor = urgency === 'overdue' ? '#E76B5D'
                                 : urgency === 'soon'    ? '#C98A2C'
                                 : pal.textSoft;
-              const owner = r.contractorName || r.schoolName || r.districtName || '—';
+              // Live name lookup beats the snapshot stored on the renewal.
+              const liveName = r.contractorId && window.contractorDisplayName
+                ? window.contractorDisplayName(r.contractorId)
+                : null;
+              const owner = liveName || r.contractorName || r.schoolName || r.districtName || '—';
               const label = r.label
                 ? `${owner} · ${r.label}${r.state ? ` (${r.state})` : ''}`
                 : owner;

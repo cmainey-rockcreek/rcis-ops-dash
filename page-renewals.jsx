@@ -17,6 +17,9 @@
 
   function RenewalsList({ pal }) {
     const renewals = window.useRenewals();
+    // Subscribe so renamed contractors propagate to row labels via the
+    // contractorDisplayName lookup in RenewalRow.
+    if (window.useContractorOverrides) window.useContractorOverrides();
     const [query, setQuery] = React.useState('');
     const [kindFilter, setKindFilter] = React.useState('all'); // all|contractor|client
     const [editor, setEditor] = React.useState(null);
@@ -230,8 +233,12 @@
     const urgency = window.renewalUrgency(r.expiresOn);
     const days = window.daysUntilRenewal(r.expiresOn);
 
-    const owner = r.contractorName || r.schoolName || r.districtName || '—';
-    const ownerSub = r.contractorName
+    // Prefer the contractor's current (override) name over the snapshot.
+    const liveName = r.contractorId && window.contractorDisplayName
+      ? window.contractorDisplayName(r.contractorId)
+      : null;
+    const owner = liveName || r.contractorName || r.schoolName || r.districtName || '—';
+    const ownerSub = (liveName || r.contractorName)
       ? (r.state ? `Contractor · ${r.state}` : 'Contractor')
       : r.schoolName
         ? `${r.districtName || 'School'} · ${r.state || ''}`

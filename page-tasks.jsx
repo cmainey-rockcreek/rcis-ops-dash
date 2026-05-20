@@ -35,6 +35,8 @@
   function TasksWorkspace({ pal }) {
     const todos = window.useTodos();
     const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
+    // Re-render when a contractor name changes so linked-task chips update.
+    if (window.useContractorOverrides) window.useContractorOverrides();
     const [editor, setEditor] = React.useState(null);
     const [dragId, setDragId] = React.useState(null);
     const [dragOver, setDragOver] = React.useState(null);
@@ -463,7 +465,10 @@
             fontSize: 10.5,
           }}>
             <window.LinkTypeBadge type={todo.linkedTo.type} pal={pal} />
-            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{todo.linkedTo.name}</span>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {(todo.linkedTo.type === 'contractor' && window.contractorDisplayName
+                ? window.contractorDisplayName(todo.linkedTo.id) : null) || todo.linkedTo.name}
+            </span>
           </div>
         )}
 

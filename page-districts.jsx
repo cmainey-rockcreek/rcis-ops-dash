@@ -21,7 +21,7 @@
       students += s.students || 0;
       for (const cov of s.contractors || []) {
         contractorIds.add(cov.contractorId);
-        const c = window.getContractor(cov.contractorId);
+        const c = (window.getContractorEnriched || window.getContractor)(cov.contractorId);
         if (!c) continue;
         weeklyHours += cov.hoursPerWeek || 0;
         // Roll the contractor's bill/pay into annual revenue/margin per
