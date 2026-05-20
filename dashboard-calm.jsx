@@ -682,12 +682,22 @@
     );
   }
 
+  // Greeting that follows the local time of day. Boundaries kept loose so
+  // late-night work still reads as "evening" rather than "morning."
+  function greetingPrefix(hour) {
+    if (hour < 5)  return 'Good evening';     // late night / early hours
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
   // ─── Main ─────────────────────────────────────────────────────────────────
   function DashboardCalm({ dark = false, widgets = {} }) {
     if (window.useTeam) window.useTeam();
     const current = window.TeamStore && window.TeamStore.current();
     const firstName = current && current.name ? current.name.split(' ')[0] : 'there';
     const show = (k) => widgets[k] !== false;
+    const greeting = greetingPrefix(new Date().getHours());
 
     // Live data for the greeting + stat tiles.
     const gaps        = window.useCoverageGaps ? window.useCoverageGaps() : [];
@@ -765,7 +775,7 @@
           }}>
             <div>
               <div style={{ fontSize: 20, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>
-                Good morning, {firstName}
+                {greeting}, {firstName}
               </div>
               <div style={{ fontSize: 12.5, color: pal.textSoft, marginTop: 2 }}>
                 {today}
