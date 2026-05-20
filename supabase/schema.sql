@@ -149,17 +149,27 @@ create index if not exists assignments_status_idx     on public.assignments (sta
 -- Deleted on Confirm (which creates an Assignment + marks the gap filled)
 -- or Dismiss. Persisted so the shortlist is collaborative across teammates.
 create table if not exists public.match_proposals (
-  id             text primary key,
-  gap_id         text not null references public.coverage_gaps(id) on delete cascade,
-  contractor_id  text not null,
-  note           text default '',
-  created_by     uuid references public.team_profiles(id) on delete set null,
-  created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now(),
-  unique (gap_id, contractor_id)
+  id                      text primary key,
+  gap_id                  text not null references public.coverage_gaps(id) on delete cascade,
+  contractor_id           text not null,
+  note                    text default '',
+  status                  text not null default 'pending'
+    check (status in ('pending','confirmed','dismissed')),
+  decided_at              timestamptz,
+  decided_by              uuid references public.team_profiles(id) on delete set null,
+  resulting_assignment_id text,
+  created_by              uuid references public.team_profiles(id) on delete set null,
+  created_at              timestamptz not null default now(),
+  updated_at              timestamptz not null default now()
 );
 create index if not exists match_proposals_gap_idx        on public.match_proposals (gap_id);
 create index if not exists match_proposals_contractor_idx on public.match_proposals (contractor_id);
+create index if not exists match_proposals_status_idx     on public.match_proposals (status, decided_at desc);
+-- Partial unique: only one PENDING proposal per (gap, contractor) pair.
+-- Confirmed and dismissed history rows are not constrained.
+create unique index if not exists match_proposals_pending_unique
+  on public.match_proposals (gap_id, contractor_id)
+  where status = 'pending';
 
 -- ─── schedule_slots ──────────────────────────────────────────────────────
 -- Row-per-time-block contractor schedules. Each slot is one specific

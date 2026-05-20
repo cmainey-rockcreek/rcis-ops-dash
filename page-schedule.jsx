@@ -279,28 +279,38 @@
       : null;
 
     // Shortlisted gap × contractor pairings (Supabase-backed, see
-    // match-proposals-store.js). The shortlist strip below the two panels
-    // renders these.
-    const proposals = window.useMatchProposals ? window.useMatchProposals() : [];
+    // match-proposals-store.js). The shortlist strip renders only `pending`;
+    // confirmed/dismissed rows live in History.
+    const allProposals     = window.useMatchProposals ? window.useMatchProposals() : [];
+    const proposals        = React.useMemo(() => allProposals.filter((p) => p.status === 'pending'), [allProposals]);
+    const decidedProposals = React.useMemo(
+      () => allProposals.filter((p) => p.status !== 'pending')
+        .sort((a, b) => (b.decidedAt || 0) - (a.decidedAt || 0)),
+      [allProposals],
+    );
+    const [historyOpen, setHistoryOpen] = React.useState(false);
+
     const isShortlisted = (gapId, contractorId) =>
       proposals.some((p) => p.gapId === gapId && p.contractorId === contractorId);
     const addToShortlist = async (gap, contractor) => {
       if (!gap || !contractor) return;
       await window.MatchProposalsStore.add(gap.id, contractor.id);
     };
-    const dismissProposal = (proposalId) => window.MatchProposalsStore.remove(proposalId);
-    const updateProposalNote = (proposalId, note) => window.MatchProposalsStore.updateNote(proposalId, note);
+    const dismissProposal     = (proposalId) => window.MatchProposalsStore.dismiss(proposalId);
+    const removeProposal      = (proposalId) => window.MatchProposalsStore.remove(proposalId);
+    const updateProposalNote  = (proposalId, note) => window.MatchProposalsStore.updateNote(proposalId, note);
+
     const confirmProposal = async (proposal) => {
       const gap = allGaps.find((g) => g.id === proposal.gapId);
       const contractor = contractors.find((c) => c.id === proposal.contractorId);
       if (!gap || !contractor) {
-        // Stale — quietly drop.
+        // Stale source records — just drop entirely.
         await window.MatchProposalsStore.remove(proposal.id);
         return;
       }
       if (gap.status !== 'open') {
-        // Someone else filled it — just drop the proposal.
-        await window.MatchProposalsStore.remove(proposal.id);
+        // Someone else filled it — auto-dismiss for the audit trail.
+        await window.MatchProposalsStore.dismiss(proposal.id);
         return;
       }
       // Create the assignment.
@@ -308,7 +318,7 @@
       const directHours = Number(gap.hours) || 0;
       const billRate = gap.billRate != null ? Number(gap.billRate) : null;
       const payRate  = contractor.rates && contractor.rates.hourly != null ? Number(contractor.rates.hourly) : null;
-      await window.AssignmentsStore.add({
+      const created = await window.AssignmentsStore.add({
         contractorId: contractor.id,
         contractorName: contractor.name,
         schoolId: gap.scope === 'school' ? gap.schoolId : null,
@@ -324,10 +334,12 @@
       });
       // Mark the gap filled.
       await window.GapsStore.update(gap.id, { status: 'filled' });
-      // Drop the proposal (and any other proposals on the same gap, since
-      // it's filled now).
-      const stale = proposals.filter((p) => p.gapId === gap.id);
-      await Promise.all(stale.map((p) => window.MatchProposalsStore.remove(p.id)));
+      // Flip THIS proposal to confirmed (with the assignment id), and
+      // dismiss any other pending proposals on the same gap so they're not
+      // orphaned and the audit shows they were closed out.
+      await window.MatchProposalsStore.markConfirmed(proposal.id, created ? created.id : null);
+      const others = proposals.filter((p) => p.gapId === gap.id && p.id !== proposal.id);
+      await Promise.all(others.map((p) => window.MatchProposalsStore.dismiss(p.id)));
     };
 
     const selectGap = (id) => {
@@ -482,10 +494,12 @@
           />
         </div>
 
-        {proposals.length > 0 && (
+        {(proposals.length > 0 || decidedProposals.length > 0) && (
           <ShortlistStrip
             pal={pal}
             proposals={proposals}
+            historyCount={decidedProposals.length}
+            onOpenHistory={() => setHistoryOpen(true)}
             gaps={allGaps}
             contractors={contractors}
             rateOverrides={rateOverrides}
@@ -493,6 +507,17 @@
             onDismiss={dismissProposal}
             onUpdateNote={updateProposalNote}
             onCreateTask={openTaskDraftFor}
+          />
+        )}
+
+        {historyOpen && (
+          <MatchHistoryModal
+            pal={pal}
+            decided={decidedProposals}
+            gaps={allGaps}
+            contractors={contractors}
+            onClose={() => setHistoryOpen(false)}
+            onRemove={removeProposal}
           />
         )}
 
@@ -1019,7 +1044,7 @@
   // Horizontal scroller of proposed gap × contractor pairings. Each card
   // shows enough context (school/district, spec, hours, margin, weekly rev)
   // to make a confirm/dismiss decision without leaving the page.
-  function ShortlistStrip({ pal, proposals, gaps, contractors, rateOverrides, onConfirm, onDismiss, onUpdateNote, onCreateTask }) {
+  function ShortlistStrip({ pal, proposals, historyCount, onOpenHistory, gaps, contractors, rateOverrides, onConfirm, onDismiss, onUpdateNote, onCreateTask }) {
     return (
       <div style={{
         background: pal.card,
@@ -1040,7 +1065,26 @@
           <span style={{ fontSize: 11.5, color: pal.textFaint, marginLeft: 6 }}>
             Confirm to create an assignment and mark the gap filled.
           </span>
+          {historyCount > 0 && (
+            <button onClick={onOpenHistory}
+              style={{
+                marginLeft: 'auto',
+                padding: '4px 10px',
+                background: 'transparent', color: pal.accent,
+                border: `1px solid ${pal.border}`, borderRadius: 7,
+                fontSize: 11.5, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+              History · {historyCount}
+            </button>
+          )}
         </div>
+        {proposals.length === 0 && (
+          <div style={{ fontSize: 12, color: pal.textFaint, fontStyle: 'italic',
+            padding: '6px 0', flexShrink: 0 }}>
+            No pending shortlist. Open History to revisit past decisions.
+          </div>
+        )}
         <div style={{
           display: 'flex', gap: 10,
           overflowX: 'auto', overflowY: 'auto',
@@ -1224,6 +1268,154 @@
       cursor: 'pointer', fontFamily: 'inherit',
     };
   }
+  // ─── Match history modal ─────────────────────────────────────────────────
+  // Read-only list of confirmed + dismissed proposals. Confirmed rows link
+  // out to the assignment they spawned; dismissed rows can be deleted.
+  function MatchHistoryModal({ pal, decided, gaps, contractors, onClose, onRemove }) {
+    React.useEffect(() => {
+      const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+      document.addEventListener('keydown', onKey);
+      return () => document.removeEventListener('keydown', onKey);
+    });
+
+    const [filter, setFilter] = React.useState('all'); // all | confirmed | dismissed
+    const rows = decided.filter((p) => filter === 'all' ? true : p.status === filter);
+
+    return (
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(16,18,22,.55)',
+        backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 40,
+      }}>
+        <div onClick={(e) => e.stopPropagation()} style={{
+          background: pal.card, color: pal.text,
+          borderRadius: 14, width: '100%', maxWidth: 760, maxHeight: '88vh',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 30px 80px rgba(0,0,0,.35), 0 0 0 1px ' + pal.border,
+          overflow: 'hidden',
+          fontFamily: '"Public Sans", system-ui, sans-serif',
+        }}>
+          <div style={{
+            padding: '14px 20px',
+            borderBottom: `1px solid ${pal.border}`,
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: pal.text }}>
+              Shortlist history
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {[
+                { key: 'all',       label: 'All' },
+                { key: 'confirmed', label: 'Confirmed' },
+                { key: 'dismissed', label: 'Dismissed' },
+              ].map((opt) => {
+                const on = filter === opt.key;
+                return (
+                  <button key={opt.key} onClick={() => setFilter(opt.key)} style={{
+                    padding: '3px 10px', borderRadius: 999,
+                    border: `1px solid ${on ? pal.accent : pal.border}`,
+                    background: on ? (pal.accentSoft || pal.accent + '18') : 'transparent',
+                    color: on ? pal.accent : pal.textSoft,
+                    fontSize: 11, fontWeight: on ? 600 : 500,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}>{opt.label}</button>
+                );
+              })}
+            </div>
+            <button onClick={onClose} style={{
+              border: 'none', background: 'transparent', color: pal.textSoft,
+              fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: '2px 6px',
+            }}>×</button>
+          </div>
+
+          <div style={{ overflowY: 'auto', padding: '12px 20px' }}>
+            {rows.length === 0 ? (
+              <div style={{ padding: '24px 0', textAlign: 'center', color: pal.textFaint, fontSize: 12.5 }}>
+                Nothing here yet.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {rows.map((p) => {
+                  const gap = gaps.find((g) => g.id === p.gapId);
+                  const contractor = contractors.find((c) => c.id === p.contractorId);
+                  const placement = gap
+                    ? (gap.scope === 'school' ? gap.schoolName : `${gap.districtName} (district-wide)`)
+                    : '—';
+                  const deciderName = (() => {
+                    if (!p.decidedBy || !window.TeamStore) return null;
+                    const t = window.TeamStore.get && window.TeamStore.get().find((m) => m.id === p.decidedBy);
+                    return t ? t.name : null;
+                  })();
+                  const isConfirmed = p.status === 'confirmed';
+                  return (
+                    <div key={p.id} style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'auto 1fr auto',
+                      gap: 12, alignItems: 'center',
+                      padding: '10px 12px',
+                      background: pal.cardAlt,
+                      border: `1px solid ${pal.borderSoft}`,
+                      borderLeft: `3px solid ${isConfirmed ? '#3E8A57' : pal.textFaint}`,
+                      borderRadius: 7,
+                    }}>
+                      <span style={{
+                        fontSize: 10, fontWeight: 800, letterSpacing: 0.5,
+                        textTransform: 'uppercase',
+                        color: isConfirmed ? '#3E8A57' : pal.textFaint,
+                        background: (isConfirmed ? '#3E8A57' : pal.textFaint) + '18',
+                        padding: '3px 7px', borderRadius: 4,
+                        whiteSpace: 'nowrap',
+                      }}>{isConfirmed ? 'Confirmed' : 'Dismissed'}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: pal.text, fontWeight: 600,
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {contractor ? contractor.name : '—'}
+                          <span style={{ color: pal.textFaint, fontWeight: 400 }}> · </span>
+                          {placement}
+                        </div>
+                        <div style={{ fontSize: 11, color: pal.textFaint, marginTop: 1,
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {gap ? `${gap.spec} · ${gap.state} · ${gap.hours}h/wk` : ''}
+                          {deciderName && <> · by {deciderName}</>}
+                          {p.decidedAt && <> · {timeAgo(p.decidedAt)}</>}
+                          {p.note && <> · "{p.note}"</>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {isConfirmed && p.resultingAssignmentId && contractor && (
+                          <window.Link to={`/contractors/${contractor.id}`} style={{
+                            padding: '5px 10px',
+                            background: 'transparent', color: pal.accent,
+                            border: `1px solid ${pal.border}`, borderRadius: 6,
+                            fontSize: 11.5, fontWeight: 600,
+                            textDecoration: 'none', whiteSpace: 'nowrap',
+                          }}>View assignment →</window.Link>
+                        )}
+                        {!isConfirmed && (
+                          <button onClick={() => onRemove(p.id)} style={btnGhost(pal)}>Delete</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function timeAgo(t) {
+    const sec = Math.floor((Date.now() - t) / 1000);
+    if (sec < 60) return 'just now';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+    return Math.floor(sec / 86400) + 'd ago';
+  }
+
   function btnGhostAccent(pal) {
     return {
       padding: '5px 10px',
