@@ -329,7 +329,10 @@
   }
 
   function ContractorDetail({ pal, id }) {
-    const c = window.getContractor(id);
+    const base = window.getContractor(id);
+    // Layer Supabase overrides (pay/bill rate, edited schedule) on top of the
+    // mock defaults. Persisted assignments are merged in via the AssignmentsCard.
+    const c = window.useContractorView ? window.useContractorView(base) : base;
     if (!c) return <NotFound pal={pal} id={id} />;
 
     return (
@@ -392,6 +395,15 @@
   function ContractorHeader({ c, pal }) {
     const initials = c.name.split(' ').map((p) => p[0]).join('').slice(0, 2);
     const free = c.cap - c.assigned;
+    // Pull merged assignments so revenue/margin update live with edits.
+    const assignments = window.useContractorAssignments
+      ? window.useContractorAssignments(c)
+      : (c.assignments || []);
+    const F = window.ContractorFinancials || {};
+    const defaults = { bill: c.rates && c.rates.bill, pay: c.rates && c.rates.hourly };
+    const monthlyRev = F.monthlyRevenue ? F.monthlyRevenue(assignments, defaults) : 0;
+    const marginHr   = F.marginPerHour  ? F.marginPerHour(assignments, defaults)  : 0;
+    const fmt        = F.formatUSD || ((n) => `$${(n || 0).toLocaleString()}`);
     return (
       <div style={{ padding: '14px 24px 4px', display: 'flex', alignItems: 'flex-start', gap: 18 }}>
         <span style={{
@@ -426,19 +438,88 @@
             display: 'flex', gap: 18, padding: '10px 14px',
             background: pal.card, border: `1px solid ${pal.border}`, borderRadius: 9,
           }}>
-            <Kpi pal={pal} label="Cost"     value={`$${c.rates.hourly}`} sub="/hour" />
-            <Kpi pal={pal} label="Bill"     value={`$${c.rates.bill}`}   sub="/hour" />
+            <EditableRateKpi pal={pal} label="Pay Rate"
+              value={c.rates.hourly}
+              onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { payRate: v })} />
+            <EditableRateKpi pal={pal} label="Bill Rate"
+              value={c.rates.bill}
+              onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { billRate: v })} />
             <Kpi pal={pal} label="Load"     value={`${c.assigned}h`}     sub={`of ${c.cap}h`} />
             <Kpi pal={pal} label="Free"     value={`${Math.max(0, free)}h`} sub="this week"
                  valueColor={free > 0 ? pal.accent : pal.textFaint} />
-            <Kpi pal={pal} label="Revenue"  value={`$${(c.rates.bill * c.assigned * 4).toLocaleString()}`} sub="/month"
+            <Kpi pal={pal} label="Revenue"  value={fmt(monthlyRev)} sub="/month"
                  valueColor={pal.accent} />
-            <Kpi pal={pal} label="Margin"   value={`$${((c.rates.bill - c.rates.hourly) * c.assigned * 4).toLocaleString()}`} sub="/month" />
+            <Kpi pal={pal} label="Margin"   value={fmt(marginHr, { cents: true })} sub="/hour"
+                 valueColor={marginHr > 0 ? pal.text : pal.warn} />
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button style={btnSecondary(pal)}>Edit</button>
-            <button style={btnPrimary(pal)}>Assign to school</button>
-          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Inline-editable pay/bill rate cell. Click value to edit; Enter/blur saves.
+  function EditableRateKpi({ pal, label, value, onSave }) {
+    const [editing, setEditing] = React.useState(false);
+    const [draft, setDraft] = React.useState(String(value || ''));
+    const inputRef = React.useRef(null);
+
+    React.useEffect(() => {
+      if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
+    }, [editing]);
+
+    const startEdit = () => { setDraft(String(value || '')); setEditing(true); };
+    const commit = () => {
+      const num = Number(draft);
+      if (Number.isFinite(num) && num !== Number(value)) onSave(num);
+      setEditing(false);
+    };
+    const cancel = () => setEditing(false);
+    const onKey = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    };
+
+    return (
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.8, color: pal.textFaint, textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 3, justifyContent: 'center' }}>
+          {editing ? (
+            <>
+              <span style={{ fontSize: 13, color: pal.textFaint }}>$</span>
+              <input
+                ref={inputRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value.replace(/[^0-9.]/g, ''))}
+                onBlur={commit}
+                onKeyDown={onKey}
+                style={{
+                  width: 56, padding: '0 4px',
+                  background: pal.cardAlt, border: `1px solid ${pal.accent}`, borderRadius: 5,
+                  color: pal.text, fontFamily: 'inherit',
+                  fontSize: 17, fontWeight: 600,
+                  letterSpacing: -0.3, fontVariantNumeric: 'tabular-nums',
+                  textAlign: 'center', outline: 'none',
+                }}
+              />
+              <span style={{ fontSize: 10, color: pal.textFaint }}>/hour</span>
+            </>
+          ) : (
+            <>
+              <span onClick={startEdit}
+                title="Click to edit"
+                style={{
+                  fontSize: 17, fontWeight: 600, color: pal.text,
+                  letterSpacing: -0.3, fontVariantNumeric: 'tabular-nums',
+                  cursor: 'pointer', borderBottom: `1px dashed ${pal.borderSoft}`,
+                  paddingBottom: 1,
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.borderBottomColor = pal.accent}
+                onMouseLeave={(e) => e.currentTarget.style.borderBottomColor = pal.borderSoft}>
+                ${value}
+              </span>
+              <span style={{ fontSize: 10, color: pal.textFaint }}>/hour</span>
+            </>
+          )}
         </div>
       </div>
     );
@@ -495,25 +576,39 @@
     );
   }
 
-  // Capacity summary
+  // Capacity summary — sums merged assignments (mock + persisted) so adding a
+  // new assignment via "+ Add assignment" immediately updates direct/indirect
+  // totals and the capacity bar.
   function CapacityCard({ c, pal }) {
-    const directTotal = c.assignments.filter((a) => a.status === 'active').reduce((s, a) => s + (a.direct || 0), 0);
-    const indirectTotal = c.assignments.filter((a) => a.status === 'active').reduce((s, a) => s + (a.indirect || 0), 0);
+    const all = window.useContractorAssignments
+      ? window.useContractorAssignments(c)
+      : (c.assignments || []);
+    const activeRows = all.filter((a) => a.status === 'active');
+    const directTotal   = activeRows.reduce((s, a) => s + (Number(a.direct)   || 0), 0);
+    const indirectTotal = activeRows.reduce((s, a) => s + (Number(a.indirect) || 0), 0);
+    const schoolsCount  = new Set(activeRows.map((a) => a.schoolId || a.school || a.districtId || '')).size;
+    // Effective booked hours: mock c.assigned PLUS any added assignment hours
+    // from Supabase. (Mock assignments are already reflected in c.assigned.)
+    const addedHours = activeRows
+      .filter((a) => a.source === 'supabase')
+      .reduce((s, a) => s + (Number(a.direct) || 0) + (Number(a.indirect) || 0), 0);
+    const booked = (c.assigned || 0) + addedHours;
+    const pct = c.cap > 0 ? Math.round((booked / c.cap) * 100) : 0;
     return (
       <Section pal={pal} title="Capacity this week">
         <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end' }}>
           <div style={{ flex: 1 }}>
-            <CapacityBar assigned={c.assigned} cap={c.cap} height={10} track={pal.chipBg} fill={pal.accent} />
+            <CapacityBar assigned={booked} cap={c.cap} height={10} track={pal.chipBg} fill={pal.accent} />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11.5, color: pal.textSoft, fontVariantNumeric: 'tabular-nums' }}>
-              <span><b style={{ color: pal.text, fontWeight: 600 }}>{c.assigned}h</b> booked of {c.cap}h cap</span>
-              <span style={{ color: pal.accent, fontWeight: 600 }}>{Math.round((c.assigned/c.cap)*100)}%</span>
+              <span><b style={{ color: pal.text, fontWeight: 600 }}>{booked}h</b> booked of {c.cap}h cap</span>
+              <span style={{ color: pal.accent, fontWeight: 600 }}>{pct}%</span>
             </div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 16, paddingTop: 8, borderTop: `1px solid ${pal.borderSoft}` }}>
           <SplitStat pal={pal} label="Direct therapy" value={`${directTotal}h`} note="face-to-face with students" color={pal.accent} />
           <SplitStat pal={pal} label="Indirect time"  value={`${indirectTotal}h`} note="paperwork, meetings, prep" color="#C98A2C" />
-          <SplitStat pal={pal} label="Schools"        value={c.schools} note="active assignments" />
+          <SplitStat pal={pal} label="Schools"        value={schoolsCount || c.schools} note="active assignments" />
         </div>
       </Section>
     );
@@ -531,70 +626,166 @@
     );
   }
 
-  // Schedule grid (4 blocks × 5 days)
+  // Schedule grid (4 blocks × 5 days). Read-only by default; "Edit schedule"
+  // opens an editable copy in a modal. State labels: Open / Light / Active / Full.
+  const SCHEDULE_DAYS   = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const SCHEDULE_BLOCKS = [
+    { name: 'AM',   range: '8 – 11' },
+    { name: 'Mid',  range: '11 – 1' },
+    { name: 'PM',   range: '1 – 4'  },
+    { name: 'Late', range: '4 – 6'  },
+  ];
+  const SCHEDULE_LABELS = ['Open', 'Light', 'Active', 'Full'];
+
   function ScheduleCard({ c, pal }) {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-    const blocks = [
-      { name: 'AM',    range: '8 – 11' },
-      { name: 'Mid',   range: '11 – 1' },
-      { name: 'PM',    range: '1 – 4' },
-      { name: 'Late',  range: '4 – 6' },
-    ];
+    const [editing, setEditing] = React.useState(false);
+    const editBtn = (
+      <button onClick={() => setEditing(true)} style={{
+        background: 'transparent', border: 'none',
+        color: pal.accent, fontSize: 12, fontWeight: 600,
+        cursor: 'pointer', fontFamily: 'inherit', padding: 0,
+      }}>Edit schedule</button>
+    );
     return (
-      <Section pal={pal} title="Weekly schedule" action="Edit schedule">
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '64px repeat(5, 1fr)',
-          gap: 6,
-        }}>
-          <div />
-          {days.map((d) => (
-            <div key={d} style={{
-              fontSize: 10.5, fontWeight: 600, color: pal.textFaint,
-              textAlign: 'center', letterSpacing: 0.4, textTransform: 'uppercase',
-            }}>{d}</div>
-          ))}
-          {blocks.map((b, bi) => (
-            <React.Fragment key={b.name}>
-              <div style={{
-                fontSize: 11, color: pal.textSoft,
-                display: 'flex', flexDirection: 'column', justifyContent: 'center',
-              }}>
-                <span style={{ fontWeight: 600, color: pal.text }}>{b.name}</span>
-                <span style={{ fontSize: 10, color: pal.textFaint }}>{b.range}</span>
-              </div>
-              {days.map((_, di) => {
-                const load = (c.schedule[bi] || [])[di] || 0;
-                return <ScheduleCell key={di} load={load} pal={pal} />;
-              })}
-            </React.Fragment>
-          ))}
-        </div>
-        <div style={{
-          display: 'flex', gap: 12, fontSize: 10.5, color: pal.textFaint,
-          paddingTop: 6, borderTop: `1px solid ${pal.borderSoft}`,
-        }}>
-          <LegendDot pal={pal} load={0} label="Open" />
-          <LegendDot pal={pal} load={1} label="Light" />
-          <LegendDot pal={pal} load={2} label="Active" />
-          <LegendDot pal={pal} load={3} label="Full" />
-        </div>
-      </Section>
+      <>
+        <Section pal={pal} title="Weekly schedule" action={editBtn}>
+          <ScheduleGrid schedule={c.schedule} pal={pal} />
+          <div style={{
+            display: 'flex', gap: 12, fontSize: 10.5, color: pal.textFaint,
+            paddingTop: 6, borderTop: `1px solid ${pal.borderSoft}`,
+          }}>
+            <LegendDot pal={pal} load={0} label="Open" />
+            <LegendDot pal={pal} load={1} label="Light" />
+            <LegendDot pal={pal} load={2} label="Active" />
+            <LegendDot pal={pal} load={3} label="Full" />
+          </div>
+        </Section>
+        {editing && (
+          <ScheduleEditor
+            schedule={c.schedule} pal={pal}
+            onClose={() => setEditing(false)}
+            onSave={(next) => {
+              window.ContractorOverridesStore.upsert(c.id, { schedule: next });
+              setEditing(false);
+            }}
+          />
+        )}
+      </>
     );
   }
-  function ScheduleCell({ load, pal }) {
+
+  function ScheduleGrid({ schedule, pal, onClickCell }) {
+    return (
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '64px repeat(5, 1fr)',
+        gap: 6,
+      }}>
+        <div />
+        {SCHEDULE_DAYS.map((d) => (
+          <div key={d} style={{
+            fontSize: 10.5, fontWeight: 600, color: pal.textFaint,
+            textAlign: 'center', letterSpacing: 0.4, textTransform: 'uppercase',
+          }}>{d}</div>
+        ))}
+        {SCHEDULE_BLOCKS.map((b, bi) => (
+          <React.Fragment key={b.name}>
+            <div style={{
+              fontSize: 11, color: pal.textSoft,
+              display: 'flex', flexDirection: 'column', justifyContent: 'center',
+            }}>
+              <span style={{ fontWeight: 600, color: pal.text }}>{b.name}</span>
+              <span style={{ fontSize: 10, color: pal.textFaint }}>{b.range}</span>
+            </div>
+            {SCHEDULE_DAYS.map((_, di) => {
+              const load = (schedule[bi] || [])[di] || 0;
+              return (
+                <ScheduleCell key={di} load={load} pal={pal}
+                  onClick={onClickCell ? () => onClickCell(bi, di) : null} />
+              );
+            })}
+          </React.Fragment>
+        ))}
+      </div>
+    );
+  }
+
+  function ScheduleEditor({ schedule, pal, onSave, onClose }) {
+    // Local draft. Clone the 5×4 grid so we don't mutate the source until save.
+    const [draft, setDraft] = React.useState(() => {
+      const base = Array.isArray(schedule) ? schedule : [];
+      return SCHEDULE_BLOCKS.map((_, bi) =>
+        SCHEDULE_DAYS.map((__, di) => ((base[bi] || [])[di] || 0))
+      );
+    });
+    const cycle = (bi, di) => {
+      const next = draft.map((row, i) => i === bi ? row.map((v, j) => j === di ? (v + 1) % 4 : v) : row);
+      setDraft(next);
+    };
+    const reset = () => setDraft(SCHEDULE_BLOCKS.map(() => SCHEDULE_DAYS.map(() => 0)));
+
+    React.useEffect(() => {
+      const onKey = (e) => {
+        if (e.key === 'Escape') onClose();
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) onSave(draft);
+      };
+      document.addEventListener('keydown', onKey);
+      return () => document.removeEventListener('keydown', onKey);
+    });
+
+    return (
+      <div style={modalStyles(pal).backdrop} onClick={onClose}>
+        <div style={modalStyles(pal).modal} onClick={(e) => e.stopPropagation()}>
+          <div style={modalStyles(pal).header}>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: pal.text }}>
+              Edit weekly schedule
+            </div>
+            <button onClick={onClose} style={modalStyles(pal).btnIcon}>×</button>
+          </div>
+          <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 12, color: pal.textSoft }}>
+              Tap a cell to cycle through <b>Open → Light → Active → Full</b>.
+            </div>
+            <ScheduleGrid schedule={draft} pal={pal} onClickCell={cycle} />
+            <div style={{
+              display: 'flex', gap: 12, fontSize: 10.5, color: pal.textFaint,
+              paddingTop: 6, borderTop: `1px solid ${pal.borderSoft}`,
+            }}>
+              <LegendDot pal={pal} load={0} label="Open" />
+              <LegendDot pal={pal} load={1} label="Light" />
+              <LegendDot pal={pal} load={2} label="Active" />
+              <LegendDot pal={pal} load={3} label="Full" />
+            </div>
+          </div>
+          <div style={modalStyles(pal).footer}>
+            <button style={modalStyles(pal).btnDanger} onClick={reset}>Clear all</button>
+            <span style={{ flex: 1 }} />
+            <button style={modalStyles(pal).btnSecondary} onClick={onClose}>Cancel</button>
+            <button style={modalStyles(pal).btnPrimary} onClick={() => onSave(draft)}>Save schedule</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function ScheduleCell({ load, pal, onClick }) {
     const fills = [
       pal.chipBg,
       pal.accent + '33',
       pal.accent + '88',
       pal.accent,
     ];
+    const label = SCHEDULE_LABELS[load] || 'Open';
     return (
-      <div style={{
-        height: 32, borderRadius: 5,
-        background: fills[load],
-        border: `1px solid ${load === 0 ? pal.borderSoft : 'transparent'}`,
-      }} />
+      <div onClick={onClick}
+        title={onClick ? `${label} — click to change` : label}
+        style={{
+          height: 32, borderRadius: 5,
+          background: fills[load],
+          border: `1px solid ${load === 0 ? pal.borderSoft : 'transparent'}`,
+          cursor: onClick ? 'pointer' : 'default',
+          userSelect: 'none',
+        }} />
     );
   }
   function LegendDot({ pal, load, label }) {
@@ -608,30 +799,93 @@
     );
   }
 
-  // Assignments — current + past
+  // Assignments — merges mock seed assignments (read-only) with persisted
+  // Supabase rows. "+ Add assignment" opens AssignmentEditor; persisted rows
+  // are click-to-edit. Capacity calc upstream now sums hours from both.
   function AssignmentsCard({ c, pal }) {
-    const active = c.assignments.filter((a) => a.status === 'active');
-    const past   = c.assignments.filter((a) => a.status === 'completed');
+    const all = window.useContractorAssignments
+      ? window.useContractorAssignments(c)
+      : (c.assignments || []);
+    const active = all.filter((a) => a.status === 'active');
+    const past   = all.filter((a) => a.status === 'completed');
+    const [editor, setEditor] = React.useState(null);
+
+    const openNew = () => setEditor({
+      isNew: true,
+      assignment: {
+        contractorId: c.id,
+        contractorName: c.name,
+        spec: c.spec || '',
+        payRate: c.rates ? c.rates.hourly : null,
+        billRate: c.rates ? c.rates.bill : null,
+        startDate: new Date().toISOString().slice(0, 10),
+        status: 'active',
+      },
+    });
+    const openEdit = (a) => {
+      // Only persisted assignments are editable; mock ones are read-only.
+      if (a.source !== 'supabase' || !a._id) return;
+      const full = window.AssignmentsStore.get().find((x) => x.id === a._id);
+      if (!full) return;
+      setEditor({ isNew: false, assignment: { ...full } });
+    };
+    const close = () => setEditor(null);
+    const save = async (patch) => {
+      if (editor.isNew) {
+        const { id, ...rest } = patch;
+        await window.AssignmentsStore.add(rest);
+      } else {
+        await window.AssignmentsStore.update(editor.assignment.id, patch);
+      }
+      close();
+    };
+    const del = async () => {
+      if (editor && editor.assignment && editor.assignment.id) {
+        await window.AssignmentsStore.remove(editor.assignment.id);
+      }
+      close();
+    };
+
+    const addBtn = (
+      <button onClick={openNew} style={{
+        background: 'transparent', border: 'none',
+        color: pal.accent, fontSize: 12, fontWeight: 600,
+        cursor: 'pointer', fontFamily: 'inherit', padding: 0,
+      }}>+ Add assignment</button>
+    );
+
     return (
-      <Section pal={pal} title="Assignments" badge={c.assignments.length} action="+ Add assignment">
-        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6,
-          textTransform: 'uppercase', color: pal.textFaint, marginBottom: -4 }}>
-          Active · {active.length}
-        </div>
-        <AssignmentTable rows={active} pal={pal} active />
-        {past.length > 0 && (
-          <>
-            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6,
-              textTransform: 'uppercase', color: pal.textFaint, marginTop: 6, marginBottom: -4 }}>
-              History · {past.length}
-            </div>
-            <AssignmentTable rows={past} pal={pal} />
-          </>
+      <>
+        <Section pal={pal} title="Assignments" badge={all.length} action={addBtn}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6,
+            textTransform: 'uppercase', color: pal.textFaint, marginBottom: -4 }}>
+            Active · {active.length}
+          </div>
+          <AssignmentTable rows={active} pal={pal} active onRowClick={openEdit} />
+          {past.length > 0 && (
+            <>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6,
+                textTransform: 'uppercase', color: pal.textFaint, marginTop: 6, marginBottom: -4 }}>
+                History · {past.length}
+              </div>
+              <AssignmentTable rows={past} pal={pal} onRowClick={openEdit} />
+            </>
+          )}
+        </Section>
+        {editor && (
+          <AssignmentEditor
+            assignment={editor.assignment}
+            isNew={editor.isNew}
+            pal={pal}
+            onSave={save}
+            onDelete={del}
+            onClose={close}
+          />
         )}
-      </Section>
+      </>
     );
   }
-  function AssignmentTable({ rows, pal, active }) {
+  function AssignmentTable({ rows, pal, active, onRowClick }) {
     if (!rows.length) {
       return (
         <div style={{ fontSize: 12, color: pal.textFaint, fontStyle: 'italic', padding: '6px 0' }}>None.</div>
@@ -640,28 +894,318 @@
     return (
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '1.5fr 1.2fr 80px 90px 90px',
-        gap: 12, alignItems: 'center',
+        gridTemplateColumns: '1.5fr 1.2fr 70px 70px 70px 90px',
+        gap: 10, alignItems: 'center',
         fontSize: 12,
       }}>
         <Th pal={pal}>School</Th>
         <Th pal={pal}>District</Th>
         <Th pal={pal} right>Direct</Th>
         <Th pal={pal} right>Indirect</Th>
+        <Th pal={pal} right>Bill</Th>
         <Th pal={pal} right>{active ? 'Since' : 'Dates'}</Th>
-        {rows.map((a) => (
-          <React.Fragment key={(a.schoolId || a.school) + a.startDate}>
-            <div style={{ color: pal.text, fontWeight: 500, minWidth: 0,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.school}</div>
-            <div style={{ color: pal.textSoft, minWidth: 0,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.district}</div>
-            <div style={{ textAlign: 'right', color: pal.text, fontVariantNumeric: 'tabular-nums' }}>{a.direct}h</div>
-            <div style={{ textAlign: 'right', color: pal.textSoft, fontVariantNumeric: 'tabular-nums' }}>{a.indirect}h</div>
-            <div style={{ textAlign: 'right', fontSize: 11, color: pal.textFaint }}>
-              {active ? formatDate(a.startDate) : `${formatDateShort(a.startDate)} → ${formatDateShort(a.endDate)}`}
+        {rows.map((a, i) => {
+          const editable = a.source === 'supabase' && a._id;
+          const key = (a._id || a.schoolId || a.school || 'row') + ':' + (a.startDate || i);
+          const onClick = editable && onRowClick ? () => onRowClick(a) : null;
+          const baseRow = {
+            color: pal.text, fontWeight: 500, minWidth: 0,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            cursor: onClick ? 'pointer' : 'default',
+          };
+          return (
+            <React.Fragment key={key}>
+              <div onClick={onClick} style={baseRow}>
+                {a.school || (a.districtName ? `${a.districtName} (district-wide)` : '—')}
+                {a.source === 'mock' && (
+                  <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700,
+                    color: pal.textFaint, background: pal.chipBg,
+                    padding: '1px 5px', borderRadius: 3, letterSpacing: 0.4 }}>SEED</span>
+                )}
+              </div>
+              <div onClick={onClick} style={{ ...baseRow, color: pal.textSoft, fontWeight: 400 }}>{a.district || '—'}</div>
+              <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{a.direct}h</div>
+              <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', color: pal.textSoft, fontVariantNumeric: 'tabular-nums' }}>{a.indirect}h</div>
+              <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', color: pal.textSoft, fontVariantNumeric: 'tabular-nums' }}>
+                {a.billRate != null ? `$${a.billRate}` : '—'}
+              </div>
+              <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', fontSize: 11, color: pal.textFaint }}>
+                {active ? formatDate(a.startDate) : `${formatDateShort(a.startDate)} → ${formatDateShort(a.endDate)}`}
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ─── Assignment editor modal ──────────────────────────────────────────────
+  function AssignmentEditor({ assignment, isNew, pal, onSave, onDelete, onClose }) {
+    const [draft, setDraft] = React.useState({
+      id: null,
+      contractorId: null, contractorName: '',
+      schoolId: null, schoolName: '',
+      districtId: null, districtName: '',
+      spec: '',
+      directHours: 0, indirectHours: 0,
+      payRate: null, billRate: null,
+      startDate: '', endDate: '',
+      status: 'active', note: '',
+      ...assignment,
+    });
+    const [scopeOpen, setScopeOpen] = React.useState(!draft.schoolName && !draft.districtName);
+    const [scopeQuery, setScopeQuery] = React.useState('');
+    const scopeBoxRef = React.useRef(null);
+    const s = modalStyles(pal);
+
+    React.useEffect(() => {
+      if (!scopeOpen) return;
+      const onMouseDown = (e) => {
+        if (scopeBoxRef.current && !scopeBoxRef.current.contains(e.target)) setScopeOpen(false);
+      };
+      document.addEventListener('mousedown', onMouseDown);
+      return () => document.removeEventListener('mousedown', onMouseDown);
+    }, [scopeOpen]);
+
+    React.useEffect(() => {
+      const onKey = (e) => {
+        if (e.key === 'Escape') onClose();
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSave();
+      };
+      document.addEventListener('keydown', onKey);
+      return () => document.removeEventListener('keydown', onKey);
+    });
+
+    const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+
+    const scopeOptions = React.useMemo(() => {
+      const q = scopeQuery.trim().toLowerCase();
+      const match = (str) => !q || (str || '').toLowerCase().includes(q);
+      const out = [];
+      const districts = (window.RCIS_DATA && window.RCIS_DATA.DISTRICTS) || [];
+      const schools = (window.RCIS_DATA && window.RCIS_DATA.SCHOOLS) || [];
+      districts.forEach((d) => {
+        if (match(d.name) || match(d.state)) {
+          out.push({ type: 'district', id: d.id, name: d.name, state: d.state, sub: `${d.state} · district-wide` });
+        }
+      });
+      schools.forEach((s) => {
+        const dist = districts.find((d) => d.id === s.district);
+        const distName = dist ? dist.name : '';
+        if (match(s.name) || match(s.state) || match(distName)) {
+          out.push({
+            type: 'school', id: s.id, name: s.name, state: s.state,
+            districtId: s.district || null, districtName: distName,
+            sub: `${distName} · ${s.state}`,
+          });
+        }
+      });
+      return out.slice(0, 30);
+    }, [scopeQuery]);
+
+    const pickScope = (opt) => {
+      if (opt.type === 'school') {
+        set({
+          schoolId: opt.id, schoolName: opt.name,
+          districtId: opt.districtId, districtName: opt.districtName,
+        });
+      } else {
+        set({
+          schoolId: null, schoolName: '',
+          districtId: opt.id, districtName: opt.name,
+        });
+      }
+      setScopeOpen(false);
+      setScopeQuery('');
+    };
+    const clearScope = () => {
+      set({ schoolId: null, schoolName: '', districtId: null, districtName: '' });
+      setScopeOpen(true);
+      setScopeQuery('');
+    };
+    const ownerLabel = draft.schoolName || draft.districtName;
+    const ownerSub = draft.schoolName
+      ? `${draft.districtName || 'School'}`
+      : draft.districtName ? 'District-wide' : '';
+
+    const SPECIALTIES = (window.RCIS_DATA && window.RCIS_DATA.SPECIALTIES) || [];
+    const STATUSES = [
+      { key: 'active',    label: 'Active',    color: '#3E8A57' },
+      { key: 'completed', label: 'Completed', color: '#7A8290' },
+    ];
+
+    const handleSave = () => {
+      if (!ownerLabel) { setScopeOpen(true); return; }
+      if (!draft.startDate) return;
+      onSave({
+        ...draft,
+        directHours:   Number(draft.directHours) || 0,
+        indirectHours: Number(draft.indirectHours) || 0,
+        payRate:  draft.payRate  != null && draft.payRate  !== '' ? Number(draft.payRate)  : null,
+        billRate: draft.billRate != null && draft.billRate !== '' ? Number(draft.billRate) : null,
+      });
+    };
+
+    return (
+      <div style={s.backdrop} onClick={onClose}>
+        <div style={s.modal} onClick={(e) => e.stopPropagation()}>
+          <div style={s.header}>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: pal.text }}>
+              {isNew ? 'Add assignment' : 'Edit assignment'}
             </div>
-          </React.Fragment>
-        ))}
+            <button onClick={onClose} style={s.btnIcon}>×</button>
+          </div>
+          <div style={s.body}>
+            {/* Scope picker */}
+            <div>
+              <div style={s.label}>School or district</div>
+              {ownerLabel && !scopeOpen ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 12px', background: pal.cardAlt,
+                  border: `1px solid ${pal.border}`, borderRadius: 7,
+                }}>
+                  <span style={{
+                    fontSize: 9, fontWeight: 800, letterSpacing: 0.6,
+                    padding: '3px 6px', borderRadius: 4,
+                    background: (draft.schoolName ? '#E76B5D22' : pal.accent + '22'),
+                    color: (draft.schoolName ? '#E76B5D' : pal.accent),
+                  }}>{draft.schoolName ? 'SCHOOL' : 'DISTRICT'}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: pal.text, fontWeight: 600, fontSize: 13 }}>{ownerLabel}</div>
+                    <div style={{ color: pal.textFaint, fontSize: 11, marginTop: 1 }}>{ownerSub}</div>
+                  </div>
+                  <button onClick={clearScope}
+                    style={{ ...s.btnSecondary, padding: '4px 9px', fontSize: 11.5 }}>Change</button>
+                </div>
+              ) : (
+                <div ref={scopeBoxRef}>
+                  <input autoFocus style={s.input}
+                    placeholder="Search a school or district…"
+                    value={scopeQuery}
+                    onChange={(e) => { setScopeQuery(e.target.value); setScopeOpen(true); }}
+                    onFocus={() => setScopeOpen(true)} />
+                  {scopeOpen && (
+                    <div style={{
+                      marginTop: 6, maxHeight: 220, overflowY: 'auto',
+                      background: pal.cardAlt, border: `1px solid ${pal.border}`, borderRadius: 7,
+                    }}>
+                      {scopeOptions.length === 0 ? (
+                        <div style={{ padding: '10px 12px', fontSize: 12.5, color: pal.textFaint }}>No matches.</div>
+                      ) : scopeOptions.map((opt) => (
+                        <div key={opt.type + opt.id} onClick={() => pickScope(opt)} style={{
+                          display: 'flex', alignItems: 'center', gap: 9,
+                          padding: '7px 11px', cursor: 'pointer', fontSize: 13,
+                          borderBottom: `1px solid ${pal.borderSoft}`,
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = pal.chipBg}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                          <span style={{
+                            fontSize: 9, fontWeight: 800, letterSpacing: 0.6,
+                            padding: '3px 6px', borderRadius: 4,
+                            background: opt.type === 'school' ? '#E76B5D22' : pal.accent + '22',
+                            color: opt.type === 'school' ? '#E76B5D' : pal.accent,
+                          }}>{opt.type === 'school' ? 'SCH' : 'DIST'}</span>
+                          <span style={{ flex: 1, color: pal.text, fontWeight: 500 }}>{opt.name}</span>
+                          <span style={{ color: pal.textFaint, fontSize: 11 }}>{opt.sub}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Specialty */}
+            <div>
+              <div style={s.label}>Specialty / role</div>
+              <select style={s.input} value={draft.spec || ''}
+                onChange={(e) => set({ spec: e.target.value })}>
+                <option value="">—</option>
+                {SPECIALTIES.map((sp) => (
+                  <option key={sp.code} value={sp.code}>{sp.code} — {sp.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Hours */}
+            <div style={s.row}>
+              <div>
+                <div style={s.label}>Direct hours / week</div>
+                <input type="number" min="0" step="0.5" style={s.input}
+                  value={draft.directHours} onChange={(e) => set({ directHours: e.target.value })} />
+              </div>
+              <div>
+                <div style={s.label}>Indirect hours / week</div>
+                <input type="number" min="0" step="0.5" style={s.input}
+                  value={draft.indirectHours} onChange={(e) => set({ indirectHours: e.target.value })} />
+              </div>
+            </div>
+
+            {/* Rates */}
+            <div style={s.row}>
+              <div>
+                <div style={s.label}>Pay rate ($ / hr)</div>
+                <input type="number" min="0" step="1" style={s.input}
+                  value={draft.payRate == null ? '' : draft.payRate}
+                  onChange={(e) => set({ payRate: e.target.value })}
+                  placeholder="Contractor default" />
+              </div>
+              <div>
+                <div style={s.label}>Bill rate ($ / hr)</div>
+                <input type="number" min="0" step="1" style={s.input}
+                  value={draft.billRate == null ? '' : draft.billRate}
+                  onChange={(e) => set({ billRate: e.target.value })}
+                  placeholder="School/district rate" />
+              </div>
+            </div>
+
+            {/* Dates */}
+            <div style={s.row}>
+              <div>
+                <div style={s.label}>Start date</div>
+                <input type="date" style={s.input}
+                  value={draft.startDate || ''} onChange={(e) => set({ startDate: e.target.value })} />
+              </div>
+              <div>
+                <div style={s.label}>End date <span style={{ textTransform: 'none', fontWeight: 500 }}>· optional</span></div>
+                <input type="date" style={s.input}
+                  value={draft.endDate || ''} onChange={(e) => set({ endDate: e.target.value })} />
+              </div>
+            </div>
+
+            {/* Status */}
+            <div>
+              <div style={s.label}>Status</div>
+              <div style={s.pillRow}>
+                {STATUSES.map((st) => (
+                  <div key={st.key}
+                    style={s.pill(draft.status === st.key, st.color)}
+                    onClick={() => set({ status: st.key })}>{st.label}</div>
+                ))}
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <div style={s.label}>Notes</div>
+              <textarea rows={2} style={{ ...s.input, resize: 'vertical', minHeight: 56 }}
+                placeholder="Caseload context, schedule notes…"
+                value={draft.note || ''} onChange={(e) => set({ note: e.target.value })} />
+            </div>
+          </div>
+          <div style={s.footer}>
+            {!isNew && (
+              <button style={s.btnDanger}
+                onClick={() => { if (confirm('Delete this assignment?')) onDelete(); }}>Delete</button>
+            )}
+            <span style={{ flex: 1 }} />
+            <button style={s.btnSecondary} onClick={onClose}>Cancel</button>
+            <button style={s.btnPrimary} onClick={handleSave}>
+              {isNew ? 'Add assignment' : 'Save'}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1218,6 +1762,94 @@
     const [y, m, d] = iso.split('-').map(Number);
     const ms = new Date(y, m - 1, d).getTime() - Date.now();
     return Math.round(ms / 86400000);
+  }
+
+  // Shared modal chrome — used by ScheduleEditor and AssignmentEditor.
+  function modalStyles(pal) {
+    return {
+      backdrop: {
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(16,18,22,.55)',
+        backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 40,
+      },
+      modal: {
+        background: pal.card, color: pal.text,
+        borderRadius: 14, width: '100%', maxWidth: 560,
+        maxHeight: '92vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 30px 80px rgba(0,0,0,.35), 0 0 0 1px ' + pal.border,
+        overflow: 'hidden',
+        fontFamily: '"Public Sans", system-ui, sans-serif',
+      },
+      header: {
+        padding: '14px 20px',
+        borderBottom: `1px solid ${pal.border}`,
+        display: 'flex', alignItems: 'center', gap: 10,
+      },
+      body: {
+        padding: '16px 20px',
+        display: 'flex', flexDirection: 'column', gap: 14,
+        overflowY: 'auto',
+      },
+      label: {
+        fontSize: 11, fontWeight: 600, letterSpacing: 0.4,
+        textTransform: 'uppercase',
+        color: pal.textFaint, marginBottom: 5,
+      },
+      input: {
+        width: '100%', padding: '8px 11px',
+        fontSize: 14, color: pal.text,
+        background: pal.cardAlt,
+        border: `1px solid ${pal.border}`, borderRadius: 7,
+        outline: 'none', fontFamily: 'inherit', lineHeight: 1.4,
+      },
+      row: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
+      pillRow: { display: 'flex', gap: 6 },
+      pill: (on, color) => ({
+        flex: 1, minHeight: 32, padding: '6px 8px',
+        fontSize: 12, fontWeight: 600,
+        textAlign: 'center', whiteSpace: 'nowrap',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: 7,
+        border: `1px solid ${on ? color : pal.border}`,
+        background: on ? color + '18' : 'transparent',
+        color: on ? color : pal.textSoft,
+        cursor: 'pointer', userSelect: 'none',
+      }),
+      footer: {
+        padding: '12px 20px',
+        borderTop: `1px solid ${pal.border}`,
+        display: 'flex', alignItems: 'center', gap: 8,
+      },
+      btnPrimary: {
+        padding: '8px 16px',
+        background: pal.accent, color: '#fff',
+        border: 'none', borderRadius: 7,
+        fontSize: 13, fontWeight: 600,
+        cursor: 'pointer', fontFamily: 'inherit',
+      },
+      btnSecondary: {
+        padding: '8px 14px',
+        background: 'transparent', color: pal.textSoft,
+        border: `1px solid ${pal.border}`, borderRadius: 7,
+        fontSize: 13, fontWeight: 500,
+        cursor: 'pointer', fontFamily: 'inherit',
+      },
+      btnDanger: {
+        padding: '8px 14px',
+        background: 'transparent', color: pal.warn,
+        border: `1px solid ${pal.warn}40`, borderRadius: 7,
+        fontSize: 13, fontWeight: 500,
+        cursor: 'pointer', fontFamily: 'inherit',
+      },
+      btnIcon: {
+        width: 28, height: 28, padding: 0,
+        background: 'transparent', color: pal.textSoft,
+        border: 'none', borderRadius: 6,
+        fontSize: 18, lineHeight: 1, cursor: 'pointer',
+      },
+    };
   }
 
   window.ContractorsListPage = ContractorsListPage;

@@ -110,6 +110,49 @@ create index if not exists renewals_contractor_idx  on public.renewals (contract
 create index if not exists renewals_school_idx      on public.renewals (school_id)     where school_id is not null;
 create index if not exists renewals_district_idx    on public.renewals (district_id)   where district_id is not null;
 
+-- ─── assignments ─────────────────────────────────────────────────────────
+-- Contractor placements at schools / districts. Mock seed assignments still
+-- live in data-contractors.js and are merged on read; user-created ones land
+-- here. pay_rate and bill_rate are per-assignment so they can override the
+-- contractor's defaults from contractor_overrides.
+create table if not exists public.assignments (
+  id              text primary key,
+  contractor_id   text not null,
+  contractor_name text,
+  school_id       text,
+  school_name     text,
+  district_id     text,
+  district_name   text,
+  spec            text,
+  direct_hours    numeric not null default 0,
+  indirect_hours  numeric not null default 0,
+  pay_rate        numeric,
+  bill_rate       numeric,
+  start_date      date,
+  end_date        date,
+  status          text not null default 'active' check (status in ('active','completed')),
+  note            text default '',
+  created_by      uuid references public.team_profiles(id) on delete set null,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+create index if not exists assignments_contractor_idx on public.assignments (contractor_id);
+create index if not exists assignments_school_idx     on public.assignments (school_id)   where school_id   is not null;
+create index if not exists assignments_district_idx   on public.assignments (district_id) where district_id is not null;
+create index if not exists assignments_status_idx     on public.assignments (status);
+
+-- ─── contractor_overrides ────────────────────────────────────────────────
+-- Per-contractor edits that override the mock defaults from data-contractors.js.
+-- Stores the editable pay/bill rate plus the editable weekly schedule
+-- (5 weekdays × 4 blocks: AM/Mid/PM/Late, each 0–3 load).
+create table if not exists public.contractor_overrides (
+  contractor_id  text primary key,
+  pay_rate       numeric,
+  bill_rate      numeric,
+  schedule       jsonb,
+  updated_at     timestamptz not null default now()
+);
+
 -- ─── task_comments ───────────────────────────────────────────────────────
 -- Free-text discussion thread on a todo. Author resolves via team_profiles.
 create table if not exists public.task_comments (
@@ -187,6 +230,14 @@ create trigger touch_coverage_gaps before update on public.coverage_gaps
 
 drop trigger if exists touch_renewals on public.renewals;
 create trigger touch_renewals before update on public.renewals
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_assignments on public.assignments;
+create trigger touch_assignments before update on public.assignments
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_contractor_overrides on public.contractor_overrides;
+create trigger touch_contractor_overrides before update on public.contractor_overrides
   for each row execute function public.touch_updated_at();
 
 drop trigger if exists touch_team_profiles on public.team_profiles;
@@ -281,6 +332,8 @@ alter table public.task_comments  enable row level security;
 alter table public.coverage_gaps  enable row level security;
 alter table public.gap_comments   enable row level security;
 alter table public.renewals       enable row level security;
+alter table public.assignments    enable row level security;
+alter table public.contractor_overrides enable row level security;
 alter table public.team_profiles enable row level security;
 alter table public.contacts      enable row level security;
 alter table public.documents     enable row level security;
@@ -310,6 +363,14 @@ create policy "team full access" on public.coverage_gaps
 
 drop policy if exists "team full access" on public.renewals;
 create policy "team full access" on public.renewals
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "team full access" on public.assignments;
+create policy "team full access" on public.assignments
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "team full access" on public.contractor_overrides;
+create policy "team full access" on public.contractor_overrides
   for all to authenticated using (true) with check (true);
 
 drop policy if exists "team can read gap comments" on public.gap_comments;
@@ -366,6 +427,14 @@ exception when duplicate_object then null;
 end $$;
 do $$ begin
   alter publication supabase_realtime add table public.renewals;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.assignments;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.contractor_overrides;
 exception when duplicate_object then null;
 end $$;
 do $$ begin
