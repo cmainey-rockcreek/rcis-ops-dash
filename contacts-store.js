@@ -152,12 +152,20 @@ window.resolveLinkedName = function resolveLinkedName(linkedTo) {
     const c = window.ContactsStore.get().find((x) => x.id === id);
     return (c && c.name) || name || '';
   }
-  if (type === 'school' && window.RCIS_DATA) {
-    const s = window.RCIS_DATA.SCHOOLS.find((x) => x.id === id);
+  if (type === 'school') {
+    if (window.schoolDisplayName) {
+      const live = window.schoolDisplayName(id);
+      if (live) return live;
+    }
+    const s = window.RCIS_DATA && window.RCIS_DATA.SCHOOLS.find((x) => x.id === id);
     return (s && s.name) || name || '';
   }
-  if (type === 'district' && window.RCIS_DATA) {
-    const d = window.RCIS_DATA.DISTRICTS.find((x) => x.id === id);
+  if (type === 'district') {
+    if (window.districtDisplayName) {
+      const live = window.districtDisplayName(id);
+      if (live) return live;
+    }
+    const d = window.RCIS_DATA && window.RCIS_DATA.DISTRICTS.find((x) => x.id === id);
     return (d && d.name) || name || '';
   }
   return name || '';

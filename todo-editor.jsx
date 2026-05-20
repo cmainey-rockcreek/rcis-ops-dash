@@ -204,10 +204,12 @@
           out.push({ type: 'contact', id: p.id, name: p.name, sub: [p.role, p.organization].filter(Boolean).join(' · ') });
         }
       });
-      window.RCIS_DATA.SCHOOLS.forEach((s) => {
+      window.RCIS_DATA.SCHOOLS.forEach((raw) => {
+        const s = window.applySchoolOverride ? window.applySchoolOverride(raw) : raw;
         if (match(s.name) || match(s.state)) out.push({ type: 'school', id: s.id, name: s.name, sub: s.state });
       });
-      window.RCIS_DATA.DISTRICTS.forEach((d) => {
+      window.RCIS_DATA.DISTRICTS.forEach((raw) => {
+        const d = window.applyDistrictOverride ? window.applyDistrictOverride(raw) : raw;
         if (match(d.name) || match(d.state)) out.push({ type: 'district', id: d.id, name: d.name, sub: d.state });
       });
       return out.slice(0, 20);

@@ -85,8 +85,14 @@
           }
         });
       } else {
-        const districts = (window.RCIS_DATA && window.RCIS_DATA.DISTRICTS) || [];
-        const schools = (window.RCIS_DATA && window.RCIS_DATA.SCHOOLS) || [];
+        const districtsRaw = (window.RCIS_DATA && window.RCIS_DATA.DISTRICTS) || [];
+        const schoolsRaw = (window.RCIS_DATA && window.RCIS_DATA.SCHOOLS) || [];
+        const districts = window.applyDistrictOverride
+          ? districtsRaw.map((d) => window.applyDistrictOverride(d))
+          : districtsRaw;
+        const schools = window.applySchoolOverride
+          ? schoolsRaw.map((s) => window.applySchoolOverride(s))
+          : schoolsRaw;
         districts.forEach((d) => {
           if (match(d.name) || match(d.state)) {
             out.push({ type: 'district', id: d.id, name: d.name, state: d.state, sub: `${d.state} · district-wide` });

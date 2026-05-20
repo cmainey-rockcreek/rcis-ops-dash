@@ -173,6 +173,24 @@ create index if not exists schedule_slots_date_idx             on public.schedul
 -- Per-contractor edits that override the mock defaults from data-contractors.js.
 -- Stores the editable pay/bill rate plus the editable weekly schedule
 -- (5 weekdays × 4 blocks: AM/Mid/PM/Late, each 0–3 load).
+-- ─── school_overrides + district_overrides ──────────────────────────────
+-- Per-school and per-district edits on top of the mock defaults in
+-- data.js / data-schools.js. Mirrors contractor_overrides pattern.
+create table if not exists public.school_overrides (
+  school_id    text primary key,
+  name         text,
+  address      text,
+  main_phone   text,
+  grade_band   text,
+  students     integer,
+  updated_at   timestamptz not null default now()
+);
+create table if not exists public.district_overrides (
+  district_id  text primary key,
+  name         text,
+  updated_at   timestamptz not null default now()
+);
+
 create table if not exists public.contractor_overrides (
   contractor_id  text primary key,
   name           text,
@@ -270,6 +288,14 @@ create trigger touch_assignments before update on public.assignments
 
 drop trigger if exists touch_contractor_overrides on public.contractor_overrides;
 create trigger touch_contractor_overrides before update on public.contractor_overrides
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_school_overrides on public.school_overrides;
+create trigger touch_school_overrides before update on public.school_overrides
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_district_overrides on public.district_overrides;
+create trigger touch_district_overrides before update on public.district_overrides
   for each row execute function public.touch_updated_at();
 
 drop trigger if exists touch_schedule_slots on public.schedule_slots;
@@ -370,6 +396,8 @@ alter table public.gap_comments   enable row level security;
 alter table public.renewals       enable row level security;
 alter table public.assignments    enable row level security;
 alter table public.contractor_overrides enable row level security;
+alter table public.school_overrides    enable row level security;
+alter table public.district_overrides  enable row level security;
 alter table public.schedule_slots enable row level security;
 alter table public.team_profiles enable row level security;
 alter table public.contacts      enable row level security;
@@ -408,6 +436,14 @@ create policy "team full access" on public.assignments
 
 drop policy if exists "team full access" on public.contractor_overrides;
 create policy "team full access" on public.contractor_overrides
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "team full access" on public.school_overrides;
+create policy "team full access" on public.school_overrides
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "team full access" on public.district_overrides;
+create policy "team full access" on public.district_overrides
   for all to authenticated using (true) with check (true);
 
 drop policy if exists "team full access" on public.schedule_slots;
@@ -476,6 +512,14 @@ exception when duplicate_object then null;
 end $$;
 do $$ begin
   alter publication supabase_realtime add table public.contractor_overrides;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.school_overrides;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.district_overrides;
 exception when duplicate_object then null;
 end $$;
 do $$ begin

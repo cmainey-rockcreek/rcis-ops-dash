@@ -544,6 +544,9 @@
   // ─── Organizations card ──────────────────────────────────────────────────
   function OrganizationsCard({ c, pal, onUpdate }) {
     const [picking, setPicking] = React.useState(false);
+    // Subscribe to overrides so renamed orgs reflect immediately here.
+    if (window.useSchoolOverrides)   window.useSchoolOverrides();
+    if (window.useDistrictOverrides) window.useDistrictOverrides();
     const DISTRICTS = window.RCIS_DATA.DISTRICTS;
     const SCHOOLS   = window.RCIS_DATA.SCHOOLS;
     const has = (type, id) => c.linkedTo.some((l) => l.type === type && l.id === id);
@@ -575,9 +578,15 @@
         {!picking && c.linkedTo.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {c.linkedTo.map((l, i) => {
-              const target = l.type === 'district'
+              const raw = l.type === 'district'
                 ? DISTRICTS.find((d) => d.id === l.id)
                 : SCHOOLS.find((s) => s.id === l.id);
+              const target = !raw ? null
+                : l.type === 'district' && window.applyDistrictOverride
+                  ? window.applyDistrictOverride(raw)
+                  : l.type === 'school' && window.applySchoolOverride
+                    ? window.applySchoolOverride(raw)
+                    : raw;
               if (!target) return null;
               const isDist = l.type === 'district';
               return (

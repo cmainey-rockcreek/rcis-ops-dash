@@ -48,9 +48,16 @@
       return m;
     }, []);
 
+    // Apply school + district overrides so renames show up in the table.
+    const enrichedSchools = window.useSchoolsView
+      ? window.useSchoolsView(window.RCIS_DATA.SCHOOLS)
+      : window.RCIS_DATA.SCHOOLS;
+    // District lookup helper for the chip / column showing district name.
+    const districtOverrides = window.useDistrictOverrides ? window.useDistrictOverrides() : {};
+
     const sortedFiltered = React.useMemo(() => {
       const q = query.trim().toLowerCase();
-      let rows = window.RCIS_DATA.SCHOOLS.filter((s) => {
+      let rows = enrichedSchools.filter((s) => {
         if (districtFilter !== 'all' && s.district !== districtFilter) return false;
         if (coverageFilter && !idsWithGaps[s.id]) return false;
         if (openTodosOnly && !idsWithOpenTodos.has('s:' + s.id) && !idsWithOpenTodos.has('d:' + s.district)) return false;
@@ -78,7 +85,7 @@
         return 0;
       });
       return rows;
-    }, [query, districtFilter, coverageFilter, openTodosOnly, sort, idsWithOpenTodos, idsWithGaps]);
+    }, [enrichedSchools, query, districtFilter, coverageFilter, openTodosOnly, sort, idsWithOpenTodos, idsWithGaps]);
 
     const DISTRICT_OPTS = [
       { key: 'all', label: 'All districts' },
@@ -429,7 +436,9 @@
   }
 
   function SchoolDetail({ pal, id }) {
-    const s = window.getSchool(id);
+    const base = window.getSchool(id);
+    // Layer overrides (name, address, phone, etc.) on top of mock.
+    const s = window.useSchoolView ? window.useSchoolView(base) : base;
     if (!s) {
       return (
         <div style={{ flex: 1, padding: 40, color: pal.textSoft }}>
@@ -479,6 +488,7 @@
   function SchoolHeader({ s, pal }) {
     const contractors = s.contractors || [];
     const totalHours = contractors.reduce((sum, c) => sum + c.hoursPerWeek, 0);
+    const save = (patch) => window.SchoolOverridesStore.upsert(s.id, patch);
     return (
       <div style={{ padding: '14px 24px 4px', display: 'flex', alignItems: 'flex-start', gap: 18 }}>
         <span style={{
@@ -491,22 +501,31 @@
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>{s.name}</h1>
-            <span style={{
-              fontSize: 11, fontWeight: 700, color: pal.text,
-              padding: '3px 8px', borderRadius: 5, background: pal.chipBg, letterSpacing: 0.3,
-            }}>{s.gradeBand}</span>
+            <EditableHeading pal={pal} value={s.name}
+              fontSize={22} fontWeight={600} requireNonEmpty
+              placeholder="Unnamed school"
+              onSave={(v) => save({ name: v })} />
+            <EditableHeading pal={pal} value={s.gradeBand}
+              fontSize={11} fontWeight={700} chip
+              placeholder="Grade band"
+              onSave={(v) => save({ gradeBand: v })} />
           </div>
           <div style={{ fontSize: 13, color: pal.textSoft, marginTop: 4 }}>
-            <window.Link to="/schools" style={{ color: pal.textSoft, textDecoration: 'none', fontWeight: 500 }}>
+            <window.Link to={`/districts/${s.district}`} style={{ color: pal.textSoft, textDecoration: 'none', fontWeight: 500 }}>
               {s.districtName}
             </window.Link>
             {' · '}{s.state}
-            {' · '}{s.students.toLocaleString()} students
+            {' · '}{(s.students || 0).toLocaleString()} students
           </div>
-          <div style={{ fontSize: 12, color: pal.textFaint, marginTop: 4, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span>{s.address}</span>
-            <span>📞 {s.mainPhone}</span>
+          <div style={{ fontSize: 12, color: pal.textFaint, marginTop: 4, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <EditableHeading pal={pal} value={s.address}
+              fontSize={12} fontWeight={400} softColor
+              placeholder="Add address"
+              onSave={(v) => save({ address: v })} />
+            <EditableHeading pal={pal} value={s.mainPhone}
+              fontSize={12} fontWeight={400} softColor
+              placeholder="Add phone" prefix="📞 "
+              onSave={(v) => save({ mainPhone: v })} />
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
@@ -514,16 +533,86 @@
             display: 'flex', gap: 18, padding: '10px 14px',
             background: pal.card, border: `1px solid ${pal.border}`, borderRadius: 9,
           }}>
-            <Kpi pal={pal} label="Contractors" value={contractors.length} sub={contractors.length === 1 ? 'active' : 'active'} />
+            <Kpi pal={pal} label="Contractors" value={contractors.length} sub="active" />
             <Kpi pal={pal} label="Hours"       value={`${totalHours}h`} sub="per week" />
             <Kpi pal={pal} label="Contract"    value={s.contract.status} sub={`${s.contract.termYears}yr term`} valueColor={pal.accent} />
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button style={btnSecondary(pal)}>Edit</button>
-            <button style={btnPrimary(pal)}>Assign contractor</button>
-          </div>
         </div>
       </div>
+    );
+  }
+
+  // Inline-editable heading that adapts to size + style flags. Click to
+  // edit, Enter/blur saves, Escape cancels. Saves nothing when blank if
+  // requireNonEmpty is set.
+  function EditableHeading({ pal, value, fontSize, fontWeight, placeholder, onSave, requireNonEmpty, softColor, chip, prefix }) {
+    const [editing, setEditing] = React.useState(false);
+    const [draft, setDraft] = React.useState(value || '');
+    const inputRef = React.useRef(null);
+    React.useEffect(() => {
+      if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
+    }, [editing]);
+    const startEdit = () => { setDraft(value || ''); setEditing(true); };
+    const commit = () => {
+      const next = draft.trim();
+      if (requireNonEmpty && !next) { setEditing(false); return; }
+      if (next !== (value || '').trim()) onSave(next || null);
+      setEditing(false);
+    };
+    const cancel = () => { setDraft(value || ''); setEditing(false); };
+    const onKey = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    };
+    if (editing) {
+      return (
+        <input ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={onKey}
+          placeholder={placeholder}
+          style={{
+            margin: 0, padding: chip ? '2px 6px' : '2px 6px',
+            fontSize, fontWeight, color: pal.text,
+            letterSpacing: fontSize >= 20 ? -0.3 : (chip ? 0.3 : 0),
+            background: pal.cardAlt,
+            border: `1px solid ${pal.accent}`, borderRadius: chip ? 5 : 6,
+            outline: 'none', fontFamily: 'inherit',
+            minWidth: fontSize >= 20 ? 260 : (chip ? 80 : 160),
+          }}
+        />
+      );
+    }
+    const display = value && String(value).trim().length > 0;
+    if (chip) {
+      return (
+        <span onClick={startEdit} title="Click to edit"
+          style={{
+            fontSize, fontWeight,
+            color: display ? pal.text : pal.textFaint,
+            padding: '3px 8px', borderRadius: 5,
+            background: pal.chipBg, letterSpacing: 0.3,
+            cursor: 'pointer',
+            fontStyle: display ? 'normal' : 'italic',
+          }}>{display ? value : placeholder}</span>
+      );
+    }
+    return (
+      <span onClick={startEdit} title="Click to edit"
+        style={{
+          margin: 0, fontSize, fontWeight,
+          color: softColor ? pal.textFaint : (display ? pal.text : pal.textFaint),
+          letterSpacing: fontSize >= 20 ? -0.3 : 0,
+          cursor: 'pointer',
+          borderBottom: '1px dashed transparent',
+          paddingBottom: 1,
+          fontStyle: display ? 'normal' : 'italic',
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.borderBottomColor = pal.borderSoft}
+        onMouseLeave={(e) => e.currentTarget.style.borderBottomColor = 'transparent'}>
+        {display ? `${prefix || ''}${value}` : placeholder}
+      </span>
     );
   }
 

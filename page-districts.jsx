@@ -70,9 +70,14 @@
     const [query, setQuery] = React.useState('');
     const [sort, setSort] = React.useState({ key: 'name', dir: 'asc' });
 
+    // Apply district overrides so renames show up in the table.
+    const enriched = window.useDistrictsView
+      ? window.useDistrictsView(window.RCIS_DATA.DISTRICTS)
+      : window.RCIS_DATA.DISTRICTS;
+
     const rows = React.useMemo(() => {
       const q = query.trim().toLowerCase();
-      const all = window.RCIS_DATA.DISTRICTS
+      const all = enriched
         .filter((d) => !q || d.name.toLowerCase().includes(q) || d.state.toLowerCase().includes(q))
         .map((d) => ({ ...d, _r: rollup(d.id) }));
 
@@ -90,7 +95,7 @@
         if (av > bv) return  dirMul;
         return 0;
       });
-    }, [query, sort]);
+    }, [enriched, query, sort]);
 
     const totals = React.useMemo(() => {
       let students = 0, revenue = 0, contractors = new Set();
@@ -322,7 +327,8 @@
   }
 
   function DistrictDetail({ pal, id }) {
-    const d = window.RCIS_DATA.DISTRICTS.find((x) => x.id === id);
+    const base = window.RCIS_DATA.DISTRICTS.find((x) => x.id === id);
+    const d = window.useDistrictView ? window.useDistrictView(base) : base;
     if (!d) {
       return (
         <div style={{ flex: 1, padding: 40, color: pal.textSoft }}>
@@ -373,6 +379,7 @@
   }
 
   function DistrictHeader({ d, r, pal }) {
+    const save = (patch) => window.DistrictOverridesStore.upsert(d.id, patch);
     return (
       <div style={{ padding: '14px 24px 4px', display: 'flex', alignItems: 'flex-start', gap: 18 }}>
         <span style={{
@@ -384,7 +391,8 @@
           <Icon name="school" size={26} stroke={1.8} />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>{d.name}</h1>
+          <DistrictEditableName pal={pal} value={d.name}
+            onSave={(v) => save({ name: v })} />
           <div style={{ fontSize: 13, color: pal.textSoft, marginTop: 4 }}>
             {d.state}
             {' · '}{r.schools.length} school{r.schools.length === 1 ? '' : 's'}
@@ -402,12 +410,63 @@
             <Kpi pal={pal} label="Revenue"  value={`$${r.annualRevenue.toLocaleString()}`} sub="/year" valueColor={pal.accent} />
             <Kpi pal={pal} label="Margin"   value={`$${r.annualMargin.toLocaleString()}`} sub="/year" />
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button style={btnSecondary(pal)}>Edit</button>
-            <button style={btnPrimary(pal)}>+ Add school</button>
-          </div>
         </div>
       </div>
+    );
+  }
+
+  function DistrictEditableName({ pal, value, onSave }) {
+    const [editing, setEditing] = React.useState(false);
+    const [draft, setDraft] = React.useState(value || '');
+    const inputRef = React.useRef(null);
+    React.useEffect(() => {
+      if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
+    }, [editing]);
+    const startEdit = () => { setDraft(value || ''); setEditing(true); };
+    const commit = () => {
+      const next = draft.trim();
+      if (!next) { setEditing(false); return; }   // never blank
+      if (next !== (value || '').trim()) onSave(next);
+      setEditing(false);
+    };
+    const cancel = () => { setDraft(value || ''); setEditing(false); };
+    const onKey = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    };
+    if (editing) {
+      return (
+        <input ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={onKey}
+          style={{
+            margin: 0, padding: '2px 6px',
+            fontSize: 22, fontWeight: 600, color: pal.text,
+            letterSpacing: -0.3,
+            background: pal.cardAlt,
+            border: `1px solid ${pal.accent}`, borderRadius: 6,
+            outline: 'none', fontFamily: 'inherit',
+            minWidth: 280,
+          }}
+        />
+      );
+    }
+    return (
+      <h1 onClick={startEdit} title="Click to edit"
+        style={{
+          margin: 0,
+          fontSize: 22, fontWeight: 600, color: pal.text, letterSpacing: -0.3,
+          cursor: 'pointer',
+          borderBottom: '1px dashed transparent',
+          paddingBottom: 1,
+          display: 'inline-block',
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.borderBottomColor = pal.borderSoft}
+        onMouseLeave={(e) => e.currentTarget.style.borderBottomColor = 'transparent'}>
+        {value || 'Unnamed district'}
+      </h1>
     );
   }
 

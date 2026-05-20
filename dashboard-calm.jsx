@@ -228,9 +228,12 @@
     const TodoEditor = window.TodoEditor;
     const todos = window.useTodos();
     const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
-    // Re-render when a contractor or contact name changes so linked-task chips update.
+    // Re-render when contractor / contact / school / district names change so
+    // linked-task chips + entity references stay fresh.
     if (window.useContractorOverrides) window.useContractorOverrides();
     if (window.useContacts) window.useContacts();
+    if (window.useSchoolOverrides)   window.useSchoolOverrides();
+    if (window.useDistrictOverrides) window.useDistrictOverrides();
     const [editor, setEditor] = React.useState(null); // { todo, isNew } | null
     const [dragId, setDragId] = React.useState(null);
     const [dragOver, setDragOver] = React.useState(null);
