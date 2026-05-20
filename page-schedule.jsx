@@ -278,6 +278,58 @@
       ? contractors.find((c) => c.id === selectedContractorId)
       : null;
 
+    // Shortlisted gap × contractor pairings (Supabase-backed, see
+    // match-proposals-store.js). The shortlist strip below the two panels
+    // renders these.
+    const proposals = window.useMatchProposals ? window.useMatchProposals() : [];
+    const isShortlisted = (gapId, contractorId) =>
+      proposals.some((p) => p.gapId === gapId && p.contractorId === contractorId);
+    const addToShortlist = async (gap, contractor) => {
+      if (!gap || !contractor) return;
+      await window.MatchProposalsStore.add(gap.id, contractor.id);
+    };
+    const dismissProposal = (proposalId) => window.MatchProposalsStore.remove(proposalId);
+    const updateProposalNote = (proposalId, note) => window.MatchProposalsStore.updateNote(proposalId, note);
+    const confirmProposal = async (proposal) => {
+      const gap = allGaps.find((g) => g.id === proposal.gapId);
+      const contractor = contractors.find((c) => c.id === proposal.contractorId);
+      if (!gap || !contractor) {
+        // Stale — quietly drop.
+        await window.MatchProposalsStore.remove(proposal.id);
+        return;
+      }
+      if (gap.status !== 'open') {
+        // Someone else filled it — just drop the proposal.
+        await window.MatchProposalsStore.remove(proposal.id);
+        return;
+      }
+      // Create the assignment.
+      const today = new Date().toISOString().slice(0, 10);
+      const directHours = Number(gap.hours) || 0;
+      const billRate = gap.billRate != null ? Number(gap.billRate) : null;
+      const payRate  = contractor.rates && contractor.rates.hourly != null ? Number(contractor.rates.hourly) : null;
+      await window.AssignmentsStore.add({
+        contractorId: contractor.id,
+        contractorName: contractor.name,
+        schoolId: gap.scope === 'school' ? gap.schoolId : null,
+        schoolName: gap.scope === 'school' ? (gap.schoolName || '') : '',
+        districtId: gap.districtId || null,
+        districtName: gap.districtName || '',
+        spec: gap.spec || '',
+        directHours,
+        payRate, billRate,
+        startDate: today,
+        status: 'active',
+        note: proposal.note || '',
+      });
+      // Mark the gap filled.
+      await window.GapsStore.update(gap.id, { status: 'filled' });
+      // Drop the proposal (and any other proposals on the same gap, since
+      // it's filled now).
+      const stale = proposals.filter((p) => p.gapId === gap.id);
+      await Promise.all(stale.map((p) => window.MatchProposalsStore.remove(p.id)));
+    };
+
     const selectGap = (id) => {
       setSelectedContractorId(null);
       setSelectedGapId(id === selectedGapId ? null : id);
@@ -365,9 +417,10 @@
         display: 'flex',
         flexDirection: 'column',
         gap: 14,
-        overflowY: 'auto',
+        overflow: 'hidden',
+        minHeight: 0,
       }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexShrink: 0 }}>
           <div>
             <div style={{ fontSize: 20, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>
               Matchmaker
@@ -401,7 +454,7 @@
           contractorCount={contractors.length}
         />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: 1, minHeight: 0 }}>
           <GapsPanel
             pal={pal}
             gaps={gaps}
@@ -424,8 +477,24 @@
             gapRate={selectedGap ? effectiveRate(selectedGap, rateOverrides) : null}
             onSelectContractor={selectContractor}
             onCreateTask={openTaskDraftFor}
+            isShortlisted={isShortlisted}
+            onShortlist={addToShortlist}
           />
         </div>
+
+        {proposals.length > 0 && (
+          <ShortlistStrip
+            pal={pal}
+            proposals={proposals}
+            gaps={allGaps}
+            contractors={contractors}
+            rateOverrides={rateOverrides}
+            onConfirm={confirmProposal}
+            onDismiss={dismissProposal}
+            onUpdateNote={updateProposalNote}
+            onCreateTask={openTaskDraftFor}
+          />
+        )}
 
         {editorDraft && (
           <window.TodoEditor
@@ -490,7 +559,7 @@
             ? 'No open gaps match this contractor on specialty, state, and modality.'
             : 'No coverage gaps.'} />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 560, overflowY: 'auto', paddingRight: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
             {items.map(({ g, fit }) => (
               <GapRow
                 key={g.id}
@@ -513,7 +582,7 @@
     );
   }
 
-  function ContractorsPanel({ pal, contractors, ranked, selectedContractorId, selectedGap, gapRate, onSelectContractor, onCreateTask }) {
+  function ContractorsPanel({ pal, contractors, ranked, selectedContractorId, selectedGap, gapRate, onSelectContractor, onCreateTask, isShortlisted, onShortlist }) {
     const items = ranked ? ranked : contractors.map((c) => ({ c, fit: null }));
     const isRanked = !!ranked;
     const totalFree = items.reduce((sum, x) => sum + freeHours(x.c), 0);
@@ -525,7 +594,7 @@
         {items.length === 0 ? (
           <Empty pal={pal} text="No contractors match this gap on specialty, state, and modality." />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 560, overflowY: 'auto', paddingRight: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
             {items.map(({ c, fit }) => (
               <ContractorRow
                 key={c.id}
@@ -537,6 +606,10 @@
                 selected={c.id === selectedContractorId}
                 rankAction={isRanked
                   ? () => onCreateTask(selectedGap, c)
+                  : null}
+                shortlisted={isRanked && isShortlisted ? isShortlisted(selectedGap.id, c.id) : false}
+                onShortlist={isRanked && onShortlist
+                  ? () => onShortlist(selectedGap, c)
                   : null}
                 onClick={() => onSelectContractor(c.id)}
               />
@@ -572,6 +645,7 @@
         border: `1px solid ${pal.border}`,
         borderRadius: 10,
         padding: '20px 24px',
+        flexShrink: 0,
       }}>
         <div style={{
           display: 'grid',
@@ -618,8 +692,10 @@
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
+        minHeight: 0,        // allow flex parent to shrink us
+        overflow: 'hidden',
       }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexShrink: 0 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13.5, fontWeight: 700, color: pal.text, letterSpacing: -0.1 }}>{title}</div>
             {subtitle && (
@@ -715,7 +791,7 @@
     );
   }
 
-  function ContractorRow({ pal, contractor, fit, gapRate, neededHours, selected, rankAction, onClick }) {
+  function ContractorRow({ pal, contractor, fit, gapRate, neededHours, selected, rankAction, shortlisted, onShortlist, onClick }) {
     const free = freeHours(contractor);
     const statusColors = STATUS_COLOR(pal);
     const sColor = statusColors[contractor.status] || pal.textFaint;
@@ -800,8 +876,24 @@
             </div>
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <SpecChip code={contractor.spec} />
+          {onShortlist && (
+            <button
+              onClick={(e) => { e.stopPropagation(); if (!shortlisted) onShortlist(); }}
+              disabled={shortlisted}
+              title={shortlisted ? 'Already on the shortlist' : 'Add this gap-contractor pairing to the shortlist below'}
+              style={{
+                padding: '3px 9px', borderRadius: 999,
+                border: `1px solid ${shortlisted ? pal.borderSoft : pal.accent}`,
+                background: shortlisted ? pal.chipBg : 'transparent',
+                color: shortlisted ? pal.textFaint : pal.accent,
+                fontSize: 10.5, fontWeight: 700,
+                cursor: shortlisted ? 'default' : 'pointer', fontFamily: 'inherit',
+              }}>
+              {shortlisted ? '✓ Shortlisted' : '+ Shortlist'}
+            </button>
+          )}
           {rankAction && (
             <CreateTaskButton pal={pal} onClick={(e) => { e.stopPropagation(); rankAction(); }} />
           )}
@@ -921,6 +1013,234 @@
         borderRadius: 7,
       }}>{text}</div>
     );
+  }
+
+  // ─── Shortlist strip ─────────────────────────────────────────────────────
+  // Horizontal scroller of proposed gap × contractor pairings. Each card
+  // shows enough context (school/district, spec, hours, margin, weekly rev)
+  // to make a confirm/dismiss decision without leaving the page.
+  function ShortlistStrip({ pal, proposals, gaps, contractors, rateOverrides, onConfirm, onDismiss, onUpdateNote, onCreateTask }) {
+    return (
+      <div style={{
+        background: pal.card,
+        border: `1px solid ${pal.border}`,
+        borderRadius: 10,
+        padding: 14,
+        flexShrink: 0,        // pinned at the bottom of the workspace
+        maxHeight: '40%',     // never eats more than 40% of viewport
+        display: 'flex', flexDirection: 'column', minHeight: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10, flexShrink: 0 }}>
+          <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: pal.text }}>Shortlist</h3>
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: pal.textSoft,
+            background: pal.chipBg, padding: '1px 7px', borderRadius: 10,
+            fontVariantNumeric: 'tabular-nums',
+          }}>{proposals.length}</span>
+          <span style={{ fontSize: 11.5, color: pal.textFaint, marginLeft: 6 }}>
+            Confirm to create an assignment and mark the gap filled.
+          </span>
+        </div>
+        <div style={{
+          display: 'flex', gap: 10,
+          overflowX: 'auto', overflowY: 'auto',
+          paddingBottom: 4, flex: 1, minHeight: 0,
+        }}>
+          {proposals.map((p) => {
+            const gap = gaps.find((g) => g.id === p.gapId);
+            const contractor = contractors.find((c) => c.id === p.contractorId);
+            return (
+              <ShortlistCard key={p.id}
+                pal={pal}
+                proposal={p}
+                gap={gap}
+                contractor={contractor}
+                rateOverrides={rateOverrides}
+                onConfirm={() => onConfirm(p)}
+                onDismiss={() => onDismiss(p.id)}
+                onUpdateNote={(note) => onUpdateNote(p.id, note)}
+                onCreateTask={gap && contractor ? () => onCreateTask(gap, contractor) : null}
+              />
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  function ShortlistCard({ pal, proposal, gap, contractor, rateOverrides, onConfirm, onDismiss, onUpdateNote, onCreateTask }) {
+    const stale = !gap || !contractor || (gap && gap.status !== 'open');
+    const billRate = gap ? effectiveRate(gap, rateOverrides) : null;
+    const payRate  = contractor && contractor.rates && Number.isFinite(Number(contractor.rates.hourly))
+      ? Number(contractor.rates.hourly) : null;
+    const marginHr = (billRate != null && payRate != null) ? (billRate - payRate) : null;
+    const hours    = gap ? (Number(gap.hours) || 0) : 0;
+    const weeklyRev = (billRate != null) ? billRate * hours : null;
+    const weeklyMargin = (marginHr != null) ? marginHr * hours : null;
+    const schoolOrDist = gap
+      ? (gap.scope === 'school' ? gap.schoolName : (gap.districtName ? gap.districtName + ' (district-wide)' : ''))
+      : '';
+
+    return (
+      <div style={{
+        flex: '0 0 320px', minWidth: 320,
+        background: pal.cardAlt,
+        border: `1px solid ${pal.border}`,
+        borderRadius: 9,
+        padding: 12,
+        display: 'flex', flexDirection: 'column', gap: 8,
+      }}>
+        {stale ? (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 10,
+          }}>
+            <div style={{ fontSize: 12, color: pal.textFaint, fontStyle: 'italic' }}>
+              {gap ? 'This gap was already filled.' : 'Source record missing.'}
+            </div>
+            <button onClick={onDismiss} style={btnGhost(pal)}>Remove</button>
+          </div>
+        ) : (
+          <>
+            {/* Contractor + School/District identity */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <SpecChip code={contractor.spec} />
+                <window.Link to={`/contractors/${contractor.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    fontSize: 13.5, color: pal.text, fontWeight: 600, textDecoration: 'none',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0,
+                  }}>{contractor.name}</window.Link>
+              </div>
+              <div style={{ fontSize: 11.5, color: pal.textFaint }}>
+                {(contractor.states || []).join(', ')}
+              </div>
+            </div>
+
+            <div style={{
+              padding: '6px 8px',
+              background: pal.card,
+              border: `1px solid ${pal.borderSoft}`,
+              borderRadius: 6,
+            }}>
+              <div style={{ fontSize: 11, color: pal.textFaint, marginBottom: 2 }}>Placement</div>
+              {gap.scope === 'school' && gap.schoolId ? (
+                <window.Link to={`/schools/${gap.schoolId}`}
+                  style={{
+                    fontSize: 13, color: pal.text, fontWeight: 600, textDecoration: 'none',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block',
+                  }}>{schoolOrDist}</window.Link>
+              ) : gap.districtId ? (
+                <window.Link to={`/districts/${gap.districtId}`}
+                  style={{
+                    fontSize: 13, color: pal.text, fontWeight: 600, textDecoration: 'none',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block',
+                  }}>{schoolOrDist}</window.Link>
+              ) : (
+                <div style={{ fontSize: 13, color: pal.text, fontWeight: 600 }}>{schoolOrDist}</div>
+              )}
+              <div style={{ fontSize: 11, color: pal.textFaint, marginTop: 1 }}>
+                {gap.state} · {gap.spec} · {hours}h/wk · {modalityLabel(gapModality(gap))}
+              </div>
+            </div>
+
+            {/* Numbers */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+              <Stat pal={pal} label="Bill / hr" value={billRate != null ? fmtMoney(billRate) : '—'} />
+              <Stat pal={pal} label="Pay / hr"  value={payRate  != null ? fmtMoney(payRate)  : '—'} />
+              <Stat pal={pal} label="Margin / hr"
+                value={marginHr != null ? fmtMoney(marginHr) : '—'}
+                tone={marginHr != null && marginHr < 0 ? '#E76B5D' : pal.text} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              <Stat pal={pal} label="Weekly rev"
+                value={weeklyRev != null ? fmtMoney(weeklyRev) : '—'} tone={pal.accent} />
+              <Stat pal={pal} label="Weekly margin"
+                value={weeklyMargin != null ? fmtMoney(weeklyMargin) : '—'}
+                tone={weeklyMargin != null && weeklyMargin < 0 ? '#E76B5D' : pal.text} />
+            </div>
+
+            {/* Note */}
+            <input
+              defaultValue={proposal.note || ''}
+              placeholder="Note (optional)"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v !== (proposal.note || '')) onUpdateNote(v);
+              }}
+              style={{
+                width: '100%', padding: '5px 8px',
+                fontSize: 11.5, color: pal.text,
+                background: pal.card,
+                border: `1px solid ${pal.borderSoft}`, borderRadius: 5,
+                outline: 'none', fontFamily: 'inherit',
+              }}
+            />
+
+            <div style={{ display: 'flex', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+              <button onClick={onDismiss} style={btnGhost(pal)}>Dismiss</button>
+              {onCreateTask && (
+                <button onClick={onCreateTask} style={btnGhostAccent(pal)} title="Create a follow-up task (e.g. reach out to the contractor)">
+                  + Task
+                </button>
+              )}
+              <span style={{ flex: 1 }} />
+              <button onClick={onConfirm} style={btnPrimaryAccent(pal)}>Confirm match</button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function Stat({ pal, label, value, tone }) {
+    return (
+      <div style={{
+        background: pal.card,
+        border: `1px solid ${pal.borderSoft}`,
+        borderRadius: 5,
+        padding: '5px 8px',
+      }}>
+        <div style={{
+          fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5,
+          color: pal.textFaint, textTransform: 'uppercase',
+        }}>{label}</div>
+        <div style={{
+          fontSize: 13, fontWeight: 600,
+          color: tone || pal.text,
+          fontVariantNumeric: 'tabular-nums',
+        }}>{value}</div>
+      </div>
+    );
+  }
+
+  function btnGhost(pal) {
+    return {
+      padding: '5px 10px',
+      background: 'transparent', color: pal.textSoft,
+      border: `1px solid ${pal.border}`, borderRadius: 6,
+      fontSize: 11.5, fontWeight: 500,
+      cursor: 'pointer', fontFamily: 'inherit',
+    };
+  }
+  function btnGhostAccent(pal) {
+    return {
+      padding: '5px 10px',
+      background: 'transparent', color: pal.accent,
+      border: `1px solid ${pal.accent}`, borderRadius: 6,
+      fontSize: 11.5, fontWeight: 600,
+      cursor: 'pointer', fontFamily: 'inherit',
+    };
+  }
+  function btnPrimaryAccent(pal) {
+    return {
+      padding: '5px 12px',
+      background: pal.accent, color: '#fff',
+      border: 'none', borderRadius: 6,
+      fontSize: 11.5, fontWeight: 700,
+      cursor: 'pointer', fontFamily: 'inherit',
+    };
   }
 
   window.SchedulePage = SchedulePage;

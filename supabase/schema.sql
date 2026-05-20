@@ -144,6 +144,23 @@ create index if not exists assignments_school_idx     on public.assignments (sch
 create index if not exists assignments_district_idx   on public.assignments (district_id) where district_id is not null;
 create index if not exists assignments_status_idx     on public.assignments (status);
 
+-- ─── match_proposals ─────────────────────────────────────────────────────
+-- Matchmaker shortlist: gap × contractor pairings the team is considering.
+-- Deleted on Confirm (which creates an Assignment + marks the gap filled)
+-- or Dismiss. Persisted so the shortlist is collaborative across teammates.
+create table if not exists public.match_proposals (
+  id             text primary key,
+  gap_id         text not null references public.coverage_gaps(id) on delete cascade,
+  contractor_id  text not null,
+  note           text default '',
+  created_by     uuid references public.team_profiles(id) on delete set null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  unique (gap_id, contractor_id)
+);
+create index if not exists match_proposals_gap_idx        on public.match_proposals (gap_id);
+create index if not exists match_proposals_contractor_idx on public.match_proposals (contractor_id);
+
 -- ─── schedule_slots ──────────────────────────────────────────────────────
 -- Row-per-time-block contractor schedules. Each slot is one specific
 -- (contractor, date, start–end time) record with an optional assignment_id
@@ -302,6 +319,10 @@ drop trigger if exists touch_schedule_slots on public.schedule_slots;
 create trigger touch_schedule_slots before update on public.schedule_slots
   for each row execute function public.touch_updated_at();
 
+drop trigger if exists touch_match_proposals on public.match_proposals;
+create trigger touch_match_proposals before update on public.match_proposals
+  for each row execute function public.touch_updated_at();
+
 drop trigger if exists touch_team_profiles on public.team_profiles;
 create trigger touch_team_profiles before update on public.team_profiles
   for each row execute function public.touch_updated_at();
@@ -399,6 +420,7 @@ alter table public.contractor_overrides enable row level security;
 alter table public.school_overrides    enable row level security;
 alter table public.district_overrides  enable row level security;
 alter table public.schedule_slots enable row level security;
+alter table public.match_proposals enable row level security;
 alter table public.team_profiles enable row level security;
 alter table public.contacts      enable row level security;
 alter table public.documents     enable row level security;
@@ -448,6 +470,10 @@ create policy "team full access" on public.district_overrides
 
 drop policy if exists "team full access" on public.schedule_slots;
 create policy "team full access" on public.schedule_slots
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "team full access" on public.match_proposals;
+create policy "team full access" on public.match_proposals
   for all to authenticated using (true) with check (true);
 
 drop policy if exists "team can read gap comments" on public.gap_comments;
@@ -524,6 +550,10 @@ exception when duplicate_object then null;
 end $$;
 do $$ begin
   alter publication supabase_realtime add table public.schedule_slots;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.match_proposals;
 exception when duplicate_object then null;
 end $$;
 do $$ begin
