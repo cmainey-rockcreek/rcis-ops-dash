@@ -6,13 +6,16 @@
 
   // ─── Compute district-level rollups ───────────────────────────────────────
   // Returns { schools, students, contractorIds:Set, contractors:[{...}],
-  // weeklyHours, monthlyRevenue, monthlyMargin, gaps:[] }.
+  // weeklyHours, annualRevenue, annualMargin, gaps:[] }.
+  // Annualized at the 36-week school year (ContractorFinancials.WEEKS_PER_SCHOOL_YEAR)
+  // so this rollup agrees with the contractor profile + Matchmaker views.
   function rollup(districtId) {
     const schools = window.RCIS_DATA.SCHOOLS.filter((s) => s.district === districtId);
     const contractorIds = new Set();
     const byContractor = {};
     let students = 0, weeklyHours = 0;
-    let monthlyRevenue = 0, monthlyMargin = 0;
+    let annualRevenue = 0, annualMargin = 0;
+    const WEEKS = (window.ContractorFinancials && window.ContractorFinancials.WEEKS_PER_SCHOOL_YEAR) || 36;
 
     for (const s of schools) {
       students += s.students || 0;
@@ -21,10 +24,10 @@
         const c = window.getContractor(cov.contractorId);
         if (!c) continue;
         weeklyHours += cov.hoursPerWeek || 0;
-        // Roll the contractor's bill/cost into monthly revenue/margin per
-        // school × ~4 weeks.
-        monthlyRevenue += (c.rates.bill || 0) * (cov.hoursPerWeek || 0) * 4;
-        monthlyMargin  += ((c.rates.bill || 0) - (c.rates.hourly || 0)) * (cov.hoursPerWeek || 0) * 4;
+        // Roll the contractor's bill/pay into annual revenue/margin per
+        // school × 36-week school year.
+        annualRevenue += (c.rates.bill || 0) * (cov.hoursPerWeek || 0) * WEEKS;
+        annualMargin  += ((c.rates.bill || 0) - (c.rates.hourly || 0)) * (cov.hoursPerWeek || 0) * WEEKS;
 
         if (!byContractor[cov.contractorId]) {
           byContractor[cov.contractorId] = {
@@ -47,8 +50,8 @@
       students,
       contractors: Object.values(byContractor).sort((a, b) => b.hoursPerWeek - a.hoursPerWeek),
       weeklyHours,
-      monthlyRevenue: Math.round(monthlyRevenue),
-      monthlyMargin: Math.round(monthlyMargin),
+      annualRevenue: Math.round(annualRevenue),
+      annualMargin: Math.round(annualMargin),
       gaps,
     };
   }
@@ -79,7 +82,7 @@
         state:    (d) => d.state,
         schools:  (d) => d._r.schools.length || d.schools,
         students: (d) => d._r.students,
-        revenue:  (d) => d._r.monthlyRevenue,
+        revenue:  (d) => d._r.annualRevenue,
       }[sort.key] || ((d) => d.name);
       return [...all].sort((a, b) => {
         const av = acc(a), bv = acc(b);
@@ -93,7 +96,7 @@
       let students = 0, revenue = 0, contractors = new Set();
       for (const d of rows) {
         students += d._r.students;
-        revenue += d._r.monthlyRevenue;
+        revenue += d._r.annualRevenue;
         for (const c of d._r.contractors) contractors.add(c.id);
       }
       return { students, revenue, contractors: contractors.size };
@@ -262,7 +265,7 @@
 
         <span style={{ textAlign: 'right', fontSize: 14, color: pal.accent, fontWeight: 600,
           fontVariantNumeric: 'tabular-nums' }}>
-          ${r.monthlyRevenue.toLocaleString()}
+          ${r.annualRevenue.toLocaleString()}
         </span>
       </window.Link>
     );
@@ -396,8 +399,8 @@
           }}>
             <Kpi pal={pal} label="Schools"  value={r.schools.length} />
             <Kpi pal={pal} label="Hours"    value={`${r.weeklyHours}h`} sub="per week" />
-            <Kpi pal={pal} label="Revenue"  value={`$${r.monthlyRevenue.toLocaleString()}`} sub="/month" valueColor={pal.accent} />
-            <Kpi pal={pal} label="Margin"   value={`$${r.monthlyMargin.toLocaleString()}`} sub="/month" />
+            <Kpi pal={pal} label="Revenue"  value={`$${r.annualRevenue.toLocaleString()}`} sub="/year" valueColor={pal.accent} />
+            <Kpi pal={pal} label="Margin"   value={`$${r.annualMargin.toLocaleString()}`} sub="/year" />
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button style={btnSecondary(pal)}>Edit</button>
@@ -647,35 +650,20 @@
   }
 
   function RevenueCard({ r, pal }) {
-    const annualRev = r.monthlyRevenue * 12;
-    const annualMargin = r.monthlyMargin * 12;
-    const marginPct = r.monthlyRevenue > 0 ? Math.round((r.monthlyMargin / r.monthlyRevenue) * 100) : 0;
+    const marginPct = r.annualRevenue > 0 ? Math.round((r.annualMargin / r.annualRevenue) * 100) : 0;
     return (
       <Section pal={pal} title="Revenue">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div>
             <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6,
-              color: pal.textFaint, textTransform: 'uppercase' }}>Monthly</div>
+              color: pal.textFaint, textTransform: 'uppercase' }}>Annualized</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 3 }}>
               <span style={{ fontSize: 24, fontWeight: 600, color: pal.accent,
                 letterSpacing: -0.5, fontVariantNumeric: 'tabular-nums' }}>
-                ${r.monthlyRevenue.toLocaleString()}
+                ${r.annualRevenue.toLocaleString()}
               </span>
               <span style={{ fontSize: 11.5, color: pal.textFaint }}>
-                margin ${r.monthlyMargin.toLocaleString()} ({marginPct}%)
-              </span>
-            </div>
-          </div>
-          <div style={{ paddingTop: 10, borderTop: `1px solid ${pal.borderSoft}` }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6,
-              color: pal.textFaint, textTransform: 'uppercase' }}>Annualized</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 3 }}>
-              <span style={{ fontSize: 18, fontWeight: 600, color: pal.text,
-                letterSpacing: -0.3, fontVariantNumeric: 'tabular-nums' }}>
-                ${annualRev.toLocaleString()}
-              </span>
-              <span style={{ fontSize: 11.5, color: pal.textFaint }}>
-                margin ${annualMargin.toLocaleString()}
+                margin ${r.annualMargin.toLocaleString()} ({marginPct}%)
               </span>
             </div>
           </div>
@@ -683,8 +671,8 @@
             fontSize: 10.5, color: pal.textFaint, paddingTop: 10,
             borderTop: `1px solid ${pal.borderSoft}`, lineHeight: 1.5,
           }}>
-            Calculated from each active contractor's <b>bill rate × hours / week × 4</b>.
-            Annualized = monthly × 12. Will reflect a 36-week school year once we wire that in.
+            Each active contractor's <b>bill rate × hours / week × 36-week school year</b>.
+            Matches the contractor profile and Matchmaker views.
           </div>
         </div>
       </Section>

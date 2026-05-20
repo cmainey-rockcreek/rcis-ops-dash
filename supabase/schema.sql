@@ -126,12 +126,15 @@ create table if not exists public.assignments (
   spec            text,
   direct_hours    numeric not null default 0,
   indirect_hours  numeric not null default 0,
+  indirect_override boolean default false,
   pay_rate        numeric,
   bill_rate       numeric,
   start_date      date,
   end_date        date,
   status          text not null default 'active' check (status in ('active','completed')),
   note            text default '',
+  attachments     jsonb not null default '[]',
+  schedule        jsonb default '[]',   -- 4×5 boolean grid: schedule[block][day]
   created_by      uuid references public.team_profiles(id) on delete set null,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
@@ -140,6 +143,31 @@ create index if not exists assignments_contractor_idx on public.assignments (con
 create index if not exists assignments_school_idx     on public.assignments (school_id)   where school_id   is not null;
 create index if not exists assignments_district_idx   on public.assignments (district_id) where district_id is not null;
 create index if not exists assignments_status_idx     on public.assignments (status);
+
+-- ─── schedule_slots ──────────────────────────────────────────────────────
+-- Row-per-time-block contractor schedules. Each slot is one specific
+-- (contractor, date, start–end time) record with an optional assignment_id
+-- so we can compare allocated vs. scheduled hours. Designed for CSV/XLS
+-- import: each spreadsheet row maps directly to one slot row, with `source`
+-- and `import_batch_id` tracking provenance.
+create table if not exists public.schedule_slots (
+  id              uuid primary key default gen_random_uuid(),
+  contractor_id   text not null,
+  assignment_id   text references public.assignments(id) on delete set null,
+  slot_date       date not null,
+  start_time      time not null,
+  end_time        time not null,
+  status          text not null default 'scheduled' check (status in ('scheduled','pto','cancelled')),
+  note            text default '',
+  source          text not null default 'manual' check (source in ('manual','import')),
+  import_batch_id uuid,
+  created_by      uuid references public.team_profiles(id) on delete set null,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+create index if not exists schedule_slots_contractor_date_idx on public.schedule_slots (contractor_id, slot_date);
+create index if not exists schedule_slots_assignment_idx       on public.schedule_slots (assignment_id) where assignment_id is not null;
+create index if not exists schedule_slots_date_idx             on public.schedule_slots (slot_date);
 
 -- ─── contractor_overrides ────────────────────────────────────────────────
 -- Per-contractor edits that override the mock defaults from data-contractors.js.
@@ -240,6 +268,10 @@ drop trigger if exists touch_contractor_overrides on public.contractor_overrides
 create trigger touch_contractor_overrides before update on public.contractor_overrides
   for each row execute function public.touch_updated_at();
 
+drop trigger if exists touch_schedule_slots on public.schedule_slots;
+create trigger touch_schedule_slots before update on public.schedule_slots
+  for each row execute function public.touch_updated_at();
+
 drop trigger if exists touch_team_profiles on public.team_profiles;
 create trigger touch_team_profiles before update on public.team_profiles
   for each row execute function public.touch_updated_at();
@@ -334,6 +366,7 @@ alter table public.gap_comments   enable row level security;
 alter table public.renewals       enable row level security;
 alter table public.assignments    enable row level security;
 alter table public.contractor_overrides enable row level security;
+alter table public.schedule_slots enable row level security;
 alter table public.team_profiles enable row level security;
 alter table public.contacts      enable row level security;
 alter table public.documents     enable row level security;
@@ -371,6 +404,10 @@ create policy "team full access" on public.assignments
 
 drop policy if exists "team full access" on public.contractor_overrides;
 create policy "team full access" on public.contractor_overrides
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "team full access" on public.schedule_slots;
+create policy "team full access" on public.schedule_slots
   for all to authenticated using (true) with check (true);
 
 drop policy if exists "team can read gap comments" on public.gap_comments;
@@ -435,6 +472,10 @@ exception when duplicate_object then null;
 end $$;
 do $$ begin
   alter publication supabase_realtime add table public.contractor_overrides;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.schedule_slots;
 exception when duplicate_object then null;
 end $$;
 do $$ begin

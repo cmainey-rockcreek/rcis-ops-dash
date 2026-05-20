@@ -10,6 +10,17 @@ window.AssignmentsStore = (() => {
     return 'as' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   }
 
+  // Round to the nearest quarter-hour — keeps indirect tidy at 0.0/0.25/0.5/…
+  function roundQuarter(n) {
+    return Math.round((Number(n) || 0) * 4) / 4;
+  }
+
+  // Auto-calc rule shared with the UI: 25% of direct hours, rounded to 0.25.
+  const INDIRECT_RATIO = 0.25;
+  function autoIndirect(directHours) {
+    return roundQuarter((Number(directHours) || 0) * INDIRECT_RATIO);
+  }
+
   function fromRow(r) {
     return {
       id: r.id,
@@ -22,12 +33,15 @@ window.AssignmentsStore = (() => {
       spec: r.spec || '',
       directHours: Number(r.direct_hours) || 0,
       indirectHours: Number(r.indirect_hours) || 0,
+      indirectOverride: !!r.indirect_override,
       payRate: r.pay_rate != null ? Number(r.pay_rate) : null,
       billRate: r.bill_rate != null ? Number(r.bill_rate) : null,
       startDate: r.start_date || null,
       endDate: r.end_date || null,
       status: r.status || 'active',
       note: r.note || '',
+      attachments: Array.isArray(r.attachments) ? r.attachments : [],
+      schedule: Array.isArray(r.schedule) ? r.schedule : [],
       createdBy: r.created_by || null,
       createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
       updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : Date.now(),
@@ -46,12 +60,15 @@ window.AssignmentsStore = (() => {
       spec: a.spec || null,
       direct_hours: a.directHours || 0,
       indirect_hours: a.indirectHours || 0,
+      indirect_override: !!a.indirectOverride,
       pay_rate: a.payRate != null ? a.payRate : null,
       bill_rate: a.billRate != null ? a.billRate : null,
       start_date: a.startDate || null,
       end_date: a.endDate || null,
       status: a.status || 'active',
       note: a.note || '',
+      attachments: Array.isArray(a.attachments) ? a.attachments : [],
+      schedule: Array.isArray(a.schedule) ? a.schedule : [],
       created_by: a.createdBy || null,
     };
   }
@@ -128,15 +145,21 @@ window.AssignmentsStore = (() => {
         schoolId: null, schoolName: '',
         districtId: null, districtName: '',
         spec: '',
-        directHours: 0, indirectHours: 0,
+        directHours: 0, indirectHours: 0, indirectOverride: false,
         payRate: null, billRate: null,
         startDate: null, endDate: null,
         status: 'active', note: '',
+        attachments: [],
+        schedule: [],
         createdBy: current ? current.id : null,
         createdAt: now, updatedAt: now,
         source: 'supabase',
         ...partial,
       };
+      // If indirect wasn't overridden, derive it from direct × 0.25.
+      if (!a.indirectOverride) {
+        a.indirectHours = roundQuarter((Number(a.directHours) || 0) * 0.25);
+      }
       // If user picks an end date in the past, mark completed on save.
       if (a.endDate) {
         const today = new Date().toISOString().slice(0, 10);
@@ -157,6 +180,10 @@ window.AssignmentsStore = (() => {
       const existing = state.find((a) => a.id === id);
       if (!existing) return;
       const next = { ...existing, ...patch, updatedAt: Date.now() };
+      // Re-derive indirect from direct unless user has overridden.
+      if (!next.indirectOverride) {
+        next.indirectHours = roundQuarter((Number(next.directHours) || 0) * 0.25);
+      }
       if (next.endDate) {
         const today = new Date().toISOString().slice(0, 10);
         if (next.endDate < today && next.status === 'active') next.status = 'completed';
@@ -175,6 +202,10 @@ window.AssignmentsStore = (() => {
     },
 
     reload: load,
+
+    // Shared with the editor + financials so the rule lives in one place.
+    INDIRECT_RATIO,
+    autoIndirect,
   };
 })();
 
@@ -188,14 +219,19 @@ window.useAssignments = function useAssignments() {
 // Persisted always wins on id collision (which shouldn't happen — mock has
 // no id). Returns objects shaped like the mock format so existing UI keeps
 // working: { schoolId, school, district, state, startDate, endDate,
-// hoursPerWeek, direct, indirect, status, payRate?, billRate?, _id?, source }.
+// hoursPerWeek, direct, indirect, status, payRate?, billRate?, _id?, source,
+// attachments? }.
 window.useContractorAssignments = function useContractorAssignments(c) {
   const persisted = window.useAssignments();
   return React.useMemo(() => {
     const mock = (c && c.assignments) ? c.assignments.map((m) => ({ ...m, source: 'mock' })) : [];
     const real = persisted.filter((a) => a.contractorId === (c && c.id)).map((a) => {
       const direct = Number(a.directHours) || 0;
-      const indirect = Number(a.indirectHours) || 0;
+      // If the user hasn't overridden, the store already keeps indirect in
+      // sync at 25% of direct — fall through here for old rows just in case.
+      const indirect = a.indirectOverride
+        ? (Number(a.indirectHours) || 0)
+        : window.AssignmentsStore.autoIndirect(direct);
       return {
         _id: a.id,
         schoolId: a.schoolId || null,
@@ -207,9 +243,12 @@ window.useContractorAssignments = function useContractorAssignments(c) {
         endDate: a.endDate || null,
         hoursPerWeek: direct + indirect,
         direct, indirect,
+        indirectOverride: a.indirectOverride,
         payRate: a.payRate, billRate: a.billRate,
         status: a.status || 'active',
         spec: a.spec || '',
+        attachments: Array.isArray(a.attachments) ? a.attachments : [],
+        schedule: Array.isArray(a.schedule) ? a.schedule : [],
         source: 'supabase',
       };
     });

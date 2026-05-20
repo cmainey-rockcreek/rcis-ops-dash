@@ -401,9 +401,11 @@
       : (c.assignments || []);
     const F = window.ContractorFinancials || {};
     const defaults = { bill: c.rates && c.rates.bill, pay: c.rates && c.rates.hourly };
-    const monthlyRev = F.monthlyRevenue ? F.monthlyRevenue(assignments, defaults) : 0;
-    const marginHr   = F.marginPerHour  ? F.marginPerHour(assignments, defaults)  : 0;
-    const fmt        = F.formatUSD || ((n) => `$${(n || 0).toLocaleString()}`);
+    // Annualized at the 36-week school year — matches the Matchmaker page so
+    // both views agree on what the same hours/rates earn over a contract.
+    const annualRev = F.annualRevenue ? F.annualRevenue(assignments, defaults) : 0;
+    const marginHr  = F.marginPerHour ? F.marginPerHour(assignments, defaults)  : 0;
+    const fmt       = F.formatUSD || ((n) => `$${(n || 0).toLocaleString()}`);
     return (
       <div style={{ padding: '14px 24px 4px', display: 'flex', alignItems: 'flex-start', gap: 18 }}>
         <span style={{
@@ -447,7 +449,7 @@
             <Kpi pal={pal} label="Load"     value={`${c.assigned}h`}     sub={`of ${c.cap}h`} />
             <Kpi pal={pal} label="Free"     value={`${Math.max(0, free)}h`} sub="this week"
                  valueColor={free > 0 ? pal.accent : pal.textFaint} />
-            <Kpi pal={pal} label="Revenue"  value={fmt(monthlyRev)} sub="/month"
+            <Kpi pal={pal} label="Revenue"  value={fmt(annualRev)} sub="/year"
                  valueColor={pal.accent} />
             <Kpi pal={pal} label="Margin"   value={fmt(marginHr, { cents: true })} sub="/hour"
                  valueColor={marginHr > 0 ? pal.text : pal.warn} />
@@ -626,176 +628,427 @@
     );
   }
 
-  // Schedule grid (4 blocks × 5 days). Read-only by default; "Edit schedule"
-  // opens an editable copy in a modal. State labels: Open / Light / Active / Full.
+  // ─── Schedule (slot-based, week-navigable) ───────────────────────────────
+  // Each scheduled time block is a row in schedule_slots: contractor + exact
+  // date + start/end time + optional assignment_id. The card shows the week
+  // currently in view, bucketing slots into AM/Mid/PM/Late columns for a
+  // quick read. The data model is row-per-slot so a CSV/XLS import lands as
+  // straight inserts when we wire that path in.
   const SCHEDULE_DAYS   = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
   const SCHEDULE_BLOCKS = [
-    { name: 'AM',   range: '8 – 11' },
-    { name: 'Mid',  range: '11 – 1' },
-    { name: 'PM',   range: '1 – 4'  },
-    { name: 'Late', range: '4 – 6'  },
+    { key: 'AM',   label: 'AM',   range: '8–11',  start: '08:00', end: '11:00' },
+    { key: 'Mid',  label: 'Mid',  range: '11–1',  start: '11:00', end: '13:00' },
+    { key: 'PM',   label: 'PM',   range: '1–4',   start: '13:00', end: '16:00' },
+    { key: 'Late', label: 'Late', range: '4–6',   start: '16:00', end: '18:00' },
   ];
-  const SCHEDULE_LABELS = ['Open', 'Light', 'Active', 'Full'];
 
   function ScheduleCard({ c, pal }) {
-    const [editing, setEditing] = React.useState(false);
-    const editBtn = (
-      <button onClick={() => setEditing(true)} style={{
-        background: 'transparent', border: 'none',
-        color: pal.accent, fontSize: 12, fontWeight: 600,
-        cursor: 'pointer', fontFamily: 'inherit', padding: 0,
-      }}>Edit schedule</button>
+    const [weekStartIso, setWeekStartIso] = React.useState(() =>
+      window.SchedDates.dateToIso(window.SchedDates.startOfWeek(new Date())));
+    const slots = window.useScheduleSlots ? window.useScheduleSlots(c.id) : [];
+    const weekStartDate = window.SchedDates.isoToDate(weekStartIso);
+    const weekEndDate   = window.SchedDates.addDays(weekStartDate, 4);
+
+    const weekSlots = React.useMemo(() => {
+      const endIso = window.SchedDates.dateToIso(window.SchedDates.addDays(weekStartDate, 5));
+      return slots.filter((s) => s.slotDate >= weekStartIso && s.slotDate < endIso);
+    }, [slots, weekStartIso]);
+
+    const allAssignments = window.useContractorAssignments
+      ? window.useContractorAssignments(c)
+      : (c.assignments || []);
+    const activeAssignments = React.useMemo(
+      () => allAssignments.filter((a) => a.status === 'active' && a.source === 'supabase'),
+      [allAssignments]);
+
+    const [editor, setEditor] = React.useState(null);
+    const openNew = (dayIdx, blockIdx) => {
+      const block = SCHEDULE_BLOCKS[blockIdx];
+      const date = window.SchedDates.dateToIso(window.SchedDates.addDays(weekStartDate, dayIdx));
+      setEditor({
+        isNew: true,
+        slot: {
+          contractorId: c.id,
+          assignmentId: activeAssignments[0] ? activeAssignments[0]._id : null,
+          slotDate: date,
+          startTime: block.start,
+          endTime: block.end,
+          status: 'scheduled',
+          note: '',
+        },
+      });
+    };
+    const openEdit = (slot) => setEditor({ isNew: false, slot: { ...slot } });
+    const close = () => setEditor(null);
+    const save = async (patch) => {
+      if (editor.isNew) await window.ScheduleSlotsStore.add(patch);
+      else              await window.ScheduleSlotsStore.update(editor.slot.id, patch);
+      close();
+    };
+    const del = async () => {
+      if (editor && editor.slot && editor.slot.id) {
+        await window.ScheduleSlotsStore.remove(editor.slot.id);
+      }
+      close();
+    };
+
+    const shift = (n) => {
+      const d = window.SchedDates.addDays(weekStartDate, n * 7);
+      setWeekStartIso(window.SchedDates.dateToIso(d));
+    };
+    const goToday = () => {
+      const d = window.SchedDates.startOfWeek(new Date());
+      setWeekStartIso(window.SchedDates.dateToIso(d));
+    };
+
+    const action = (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button onClick={() => shift(-1)} title="Previous week" style={schedNavBtn(pal)}>‹</button>
+        <span style={{ fontSize: 11.5, color: pal.textSoft, fontWeight: 500,
+          fontVariantNumeric: 'tabular-nums', minWidth: 124, textAlign: 'center' }}>
+          {formatWeekRange(weekStartDate, weekEndDate)}
+        </span>
+        <button onClick={() => shift(1)} title="Next week" style={schedNavBtn(pal)}>›</button>
+        <button onClick={goToday} style={{
+          marginLeft: 4, padding: '3px 8px',
+          background: 'transparent', color: pal.accent,
+          border: `1px solid ${pal.border}`, borderRadius: 5,
+          fontSize: 10.5, fontWeight: 600,
+          cursor: 'pointer', fontFamily: 'inherit',
+        }}>Today</button>
+      </div>
     );
+
     return (
       <>
-        <Section pal={pal} title="Weekly schedule" action={editBtn}>
-          <ScheduleGrid schedule={c.schedule} pal={pal} />
-          <div style={{
-            display: 'flex', gap: 12, fontSize: 10.5, color: pal.textFaint,
-            paddingTop: 6, borderTop: `1px solid ${pal.borderSoft}`,
-          }}>
-            <LegendDot pal={pal} load={0} label="Open" />
-            <LegendDot pal={pal} load={1} label="Light" />
-            <LegendDot pal={pal} load={2} label="Active" />
-            <LegendDot pal={pal} load={3} label="Full" />
-          </div>
+        <Section pal={pal} title="Weekly schedule" action={action}>
+          <WeeklySlotGrid weekStart={weekStartDate} slots={weekSlots}
+            assignments={activeAssignments} pal={pal}
+            onCellClick={openNew} onSlotClick={openEdit} />
+          <AllocationCheck weekSlots={weekSlots} assignments={activeAssignments} pal={pal} />
         </Section>
-        {editing && (
-          <ScheduleEditor
-            schedule={c.schedule} pal={pal}
-            onClose={() => setEditing(false)}
-            onSave={(next) => {
-              window.ContractorOverridesStore.upsert(c.id, { schedule: next });
-              setEditing(false);
-            }}
-          />
+        {editor && (
+          <SlotEditor slot={editor.slot} isNew={editor.isNew}
+            assignments={activeAssignments} pal={pal}
+            onSave={save} onDelete={del} onClose={close} />
         )}
       </>
     );
   }
 
-  function ScheduleGrid({ schedule, pal, onClickCell }) {
+  function schedNavBtn(pal) {
+    return {
+      width: 22, height: 22, padding: 0,
+      background: 'transparent', color: pal.textSoft,
+      border: `1px solid ${pal.border}`, borderRadius: 5,
+      fontSize: 14, lineHeight: 1, cursor: 'pointer', fontFamily: 'inherit',
+    };
+  }
+  function formatWeekRange(start, end) {
+    const sameMonth = start.getMonth() === end.getMonth();
+    const fmtFull = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    if (sameMonth) return `${fmtFull(start)} – ${end.getDate()}`;
+    return `${fmtFull(start)} – ${fmtFull(end)}`;
+  }
+
+  // 5-day × 4-block grid. Each cell renders the slots whose start_time falls
+  // inside that block. Click empty cell to add; click slot pill to edit.
+  function WeeklySlotGrid({ weekStart, slots, assignments, pal, onCellClick, onSlotClick }) {
+    const byCell = React.useMemo(() => {
+      const grid = SCHEDULE_DAYS.map(() => SCHEDULE_BLOCKS.map(() => []));
+      slots.forEach((s) => {
+        const date = window.SchedDates.isoToDate(s.slotDate);
+        const dayIdx = Math.floor((date - weekStart) / 86400000);
+        if (dayIdx < 0 || dayIdx > 4) return;
+        const start = s.startTime || '00:00';
+        const end   = s.endTime   || start;
+        // Place the slot in every block its [start, end) range overlaps.
+        // Two intervals overlap iff start < otherEnd && end > otherStart.
+        let placed = false;
+        SCHEDULE_BLOCKS.forEach((b, bi) => {
+          if (start < b.end && end > b.start) {
+            grid[dayIdx][bi].push(s);
+            placed = true;
+          }
+        });
+        // Fallback for slots entirely outside our 8AM–6PM window — pin to
+        // the nearest block so they don't vanish silently.
+        if (!placed) {
+          const idx = start < SCHEDULE_BLOCKS[0].start ? 0 : SCHEDULE_BLOCKS.length - 1;
+          grid[dayIdx][idx].push(s);
+        }
+      });
+      // Sort slots inside each cell by start_time.
+      grid.forEach((col) => col.forEach((arr) => arr.sort((a, b) => a.startTime.localeCompare(b.startTime))));
+      return grid;
+    }, [weekStart, slots]);
+
     return (
       <div style={{
         display: 'grid',
         gridTemplateColumns: '64px repeat(5, 1fr)',
-        gap: 6,
+        gap: 4,
       }}>
         <div />
-        {SCHEDULE_DAYS.map((d) => (
-          <div key={d} style={{
-            fontSize: 10.5, fontWeight: 600, color: pal.textFaint,
-            textAlign: 'center', letterSpacing: 0.4, textTransform: 'uppercase',
-          }}>{d}</div>
-        ))}
+        {SCHEDULE_DAYS.map((d, di) => {
+          const dt = window.SchedDates.addDays(weekStart, di);
+          return (
+            <div key={d} style={{
+              fontSize: 10.5, fontWeight: 600, color: pal.textFaint,
+              textAlign: 'center', letterSpacing: 0.4, textTransform: 'uppercase',
+              padding: '2px 0',
+            }}>
+              <div>{d}</div>
+              <div style={{ fontSize: 10, fontWeight: 500, color: pal.textFaint,
+                textTransform: 'none', letterSpacing: 0, fontVariantNumeric: 'tabular-nums' }}>
+                {dt.getMonth() + 1}/{dt.getDate()}
+              </div>
+            </div>
+          );
+        })}
         {SCHEDULE_BLOCKS.map((b, bi) => (
-          <React.Fragment key={b.name}>
+          <React.Fragment key={b.key}>
             <div style={{
               fontSize: 11, color: pal.textSoft,
               display: 'flex', flexDirection: 'column', justifyContent: 'center',
             }}>
-              <span style={{ fontWeight: 600, color: pal.text }}>{b.name}</span>
+              <span style={{ fontWeight: 600, color: pal.text }}>{b.label}</span>
               <span style={{ fontSize: 10, color: pal.textFaint }}>{b.range}</span>
             </div>
-            {SCHEDULE_DAYS.map((_, di) => {
-              const load = (schedule[bi] || [])[di] || 0;
-              return (
-                <ScheduleCell key={di} load={load} pal={pal}
-                  onClick={onClickCell ? () => onClickCell(bi, di) : null} />
-              );
-            })}
+            {SCHEDULE_DAYS.map((_, di) => (
+              <SlotCell key={di} slots={byCell[di][bi]} assignments={assignments} pal={pal}
+                onEmptyClick={() => onCellClick(di, bi)} onSlotClick={onSlotClick} />
+            ))}
           </React.Fragment>
         ))}
       </div>
     );
   }
 
-  function ScheduleEditor({ schedule, pal, onSave, onClose }) {
-    // Local draft. Clone the 5×4 grid so we don't mutate the source until save.
-    const [draft, setDraft] = React.useState(() => {
-      const base = Array.isArray(schedule) ? schedule : [];
-      return SCHEDULE_BLOCKS.map((_, bi) =>
-        SCHEDULE_DAYS.map((__, di) => ((base[bi] || [])[di] || 0))
+  function SlotCell({ slots, assignments, pal, onEmptyClick, onSlotClick }) {
+    if (!slots || slots.length === 0) {
+      return (
+        <div onClick={onEmptyClick} title="Click to add a slot"
+          style={{
+            minHeight: 38, borderRadius: 5,
+            background: pal.chipBg,
+            border: `1px dashed ${pal.borderSoft}`,
+            cursor: 'pointer', userSelect: 'none',
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.borderColor = pal.accent}
+          onMouseLeave={(e) => e.currentTarget.style.borderColor = pal.borderSoft}
+        />
       );
+    }
+    return (
+      <div onClick={onEmptyClick} title="Click empty space to add another"
+        style={{
+          minHeight: 38, borderRadius: 5,
+          padding: 3, display: 'flex', flexDirection: 'column', gap: 2,
+          background: pal.cardAlt,
+          border: `1px solid ${pal.borderSoft}`,
+          cursor: 'pointer',
+        }}>
+        {slots.map((s) => (
+          <SlotPill key={s.id} slot={s} assignments={assignments} pal={pal}
+            onClick={(e) => { e.stopPropagation(); onSlotClick(s); }} />
+        ))}
+      </div>
+    );
+  }
+
+  function slotColor(slot, assignments, pal) {
+    if (slot.status === 'pto')       return '#C98A2C';
+    if (slot.status === 'cancelled') return pal.textFaint;
+    const a = assignments.find((x) => x._id === slot.assignmentId);
+    if (!a) return pal.textSoft;
+    return window.specColor ? window.specColor(a.spec || '') : pal.accent;
+  }
+  function slotLabel(slot, assignments) {
+    if (slot.status === 'pto')       return 'PTO';
+    if (slot.status === 'cancelled') return 'Cancelled';
+    const a = assignments.find((x) => x._id === slot.assignmentId);
+    if (a && a.school)   return a.school;
+    if (a && a.district) return a.district;
+    return 'Open block';
+  }
+  function SlotPill({ slot, assignments, pal, onClick }) {
+    const color = slotColor(slot, assignments, pal);
+    const label = slotLabel(slot, assignments);
+    return (
+      <button onClick={onClick}
+        title={`${slot.startTime}–${slot.endTime} · ${label}${slot.note ? ' · ' + slot.note : ''}`}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 4,
+          padding: '2px 6px',
+          background: color + '22',
+          border: `1px solid ${color}55`,
+          borderRadius: 4,
+          color: pal.text, fontSize: 10.5, fontWeight: 500,
+          textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+          minHeight: 18, lineHeight: 1.2,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+        <span style={{ fontVariantNumeric: 'tabular-nums', color: color, fontWeight: 600, flexShrink: 0 }}>
+          {slot.startTime}
+        </span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{label}</span>
+      </button>
+    );
+  }
+
+  // ─── Allocated vs. scheduled hours per assignment (this week) ───────────
+  function AllocationCheck({ weekSlots, assignments, pal }) {
+    if (!assignments || assignments.length === 0) return null;
+    const rows = assignments.map((a) => {
+      const allocated = (Number(a.direct) || 0);
+      const scheduled = weekSlots
+        .filter((s) => s.assignmentId === a._id && s.status === 'scheduled')
+        .reduce((sum, s) => sum + window.slotHours(s.startTime, s.endTime), 0);
+      const diff = scheduled - allocated;
+      let tone = pal.textSoft, label = `${scheduled}h / ${allocated}h`;
+      if (diff < -0.01)       { tone = '#C98A2C'; label = `${scheduled}h / ${allocated}h · ${(-diff).toFixed(1)}h short`; }
+      else if (diff > 0.01)   { tone = '#E76B5D'; label = `${scheduled}h / ${allocated}h · ${diff.toFixed(1)}h over`; }
+      else if (allocated > 0) { tone = '#3E8A57'; label = `${scheduled}h / ${allocated}h · matched`; }
+      const name = a.school || a.district || a.spec || 'Assignment';
+      return { id: a._id, name, label, tone };
     });
-    const cycle = (bi, di) => {
-      const next = draft.map((row, i) => i === bi ? row.map((v, j) => j === di ? (v + 1) % 4 : v) : row);
-      setDraft(next);
-    };
-    const reset = () => setDraft(SCHEDULE_BLOCKS.map(() => SCHEDULE_DAYS.map(() => 0)));
+
+    return (
+      <div style={{
+        marginTop: 8, paddingTop: 8,
+        borderTop: `1px solid ${pal.borderSoft}`,
+        display: 'flex', flexDirection: 'column', gap: 4,
+      }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+          textTransform: 'uppercase', color: pal.textFaint }}>
+          Allocated vs. scheduled this week
+        </div>
+        {rows.map((r) => (
+          <div key={r.id} style={{
+            display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 11.5,
+          }}>
+            <span style={{ flex: 1, color: pal.text, fontWeight: 500,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>
+            <span style={{ color: r.tone, fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{r.label}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // ─── SlotEditor modal ────────────────────────────────────────────────────
+  function SlotEditor({ slot, isNew, assignments, pal, onSave, onDelete, onClose }) {
+    const [draft, setDraft] = React.useState({
+      contractorId: null, assignmentId: null,
+      slotDate: '', startTime: '08:00', endTime: '11:00',
+      status: 'scheduled', note: '',
+      ...slot,
+    });
+    const s = modalStyles(pal);
 
     React.useEffect(() => {
       const onKey = (e) => {
         if (e.key === 'Escape') onClose();
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) onSave(draft);
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSave();
       };
       document.addEventListener('keydown', onKey);
       return () => document.removeEventListener('keydown', onKey);
     });
 
+    const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+    const STATUS_PILLS = [
+      { key: 'scheduled', label: 'Scheduled', color: '#3E8A57' },
+      { key: 'pto',       label: 'PTO',       color: '#C98A2C' },
+      { key: 'cancelled', label: 'Cancelled', color: '#E76B5D' },
+    ];
+
+    const handleSave = () => {
+      if (!draft.slotDate || !draft.startTime || !draft.endTime) return;
+      if (draft.endTime <= draft.startTime) return;
+      onSave({ ...draft });
+    };
+    const totalHours = window.slotHours(draft.startTime, draft.endTime);
+
     return (
-      <div style={modalStyles(pal).backdrop} onClick={onClose}>
-        <div style={modalStyles(pal).modal} onClick={(e) => e.stopPropagation()}>
-          <div style={modalStyles(pal).header}>
+      <div style={s.backdrop} onClick={onClose}>
+        <div style={s.modal} onClick={(e) => e.stopPropagation()}>
+          <div style={s.header}>
             <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: pal.text }}>
-              Edit weekly schedule
+              {isNew ? 'Add schedule slot' : 'Edit schedule slot'}
             </div>
-            <button onClick={onClose} style={modalStyles(pal).btnIcon}>×</button>
+            <button onClick={onClose} style={s.btnIcon}>×</button>
           </div>
-          <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ fontSize: 12, color: pal.textSoft }}>
-              Tap a cell to cycle through <b>Open → Light → Active → Full</b>.
+          <div style={s.body}>
+            <div>
+              <div style={s.label}>Date</div>
+              <input type="date" style={s.input}
+                value={draft.slotDate || ''}
+                onChange={(e) => set({ slotDate: e.target.value })} />
             </div>
-            <ScheduleGrid schedule={draft} pal={pal} onClickCell={cycle} />
-            <div style={{
-              display: 'flex', gap: 12, fontSize: 10.5, color: pal.textFaint,
-              paddingTop: 6, borderTop: `1px solid ${pal.borderSoft}`,
-            }}>
-              <LegendDot pal={pal} load={0} label="Open" />
-              <LegendDot pal={pal} load={1} label="Light" />
-              <LegendDot pal={pal} load={2} label="Active" />
-              <LegendDot pal={pal} load={3} label="Full" />
+            <div style={s.row}>
+              <div>
+                <div style={s.label}>Start time</div>
+                <input type="time" step="900" style={s.input}
+                  value={draft.startTime}
+                  onChange={(e) => set({ startTime: e.target.value })} />
+              </div>
+              <div>
+                <div style={{ ...s.label, display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                  <span style={{ flex: 1 }}>End time</span>
+                  {totalHours > 0 && (
+                    <span style={{ fontSize: 10, fontWeight: 500, color: pal.textFaint,
+                      textTransform: 'none', letterSpacing: 0 }}>{totalHours.toFixed(2)}h</span>
+                  )}
+                </div>
+                <input type="time" step="900" style={s.input}
+                  value={draft.endTime}
+                  onChange={(e) => set({ endTime: e.target.value })} />
+              </div>
+            </div>
+            <div>
+              <div style={s.label}>Assignment</div>
+              <select style={s.input}
+                value={draft.assignmentId || ''}
+                onChange={(e) => set({ assignmentId: e.target.value || null })}>
+                <option value="">No assignment / general</option>
+                {assignments.map((a) => (
+                  <option key={a._id} value={a._id}>
+                    {(a.school || a.district || 'Assignment')}{a.spec ? ` · ${a.spec}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div style={s.label}>Status</div>
+              <div style={s.pillRow}>
+                {STATUS_PILLS.map((p) => (
+                  <div key={p.key}
+                    style={s.pill(draft.status === p.key, p.color)}
+                    onClick={() => set({ status: p.key })}>{p.label}</div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={s.label}>Notes</div>
+              <textarea rows={2} style={{ ...s.input, resize: 'vertical', minHeight: 50 }}
+                placeholder="Covering for Sarah · session focus · etc."
+                value={draft.note || ''} onChange={(e) => set({ note: e.target.value })} />
             </div>
           </div>
-          <div style={modalStyles(pal).footer}>
-            <button style={modalStyles(pal).btnDanger} onClick={reset}>Clear all</button>
+          <div style={s.footer}>
+            {!isNew && (
+              <button style={s.btnDanger}
+                onClick={() => { if (confirm('Delete this slot?')) onDelete(); }}>Delete</button>
+            )}
             <span style={{ flex: 1 }} />
-            <button style={modalStyles(pal).btnSecondary} onClick={onClose}>Cancel</button>
-            <button style={modalStyles(pal).btnPrimary} onClick={() => onSave(draft)}>Save schedule</button>
+            <button style={s.btnSecondary} onClick={onClose}>Cancel</button>
+            <button style={s.btnPrimary} onClick={handleSave}>
+              {isNew ? 'Add slot' : 'Save'}
+            </button>
           </div>
         </div>
       </div>
-    );
-  }
-
-  function ScheduleCell({ load, pal, onClick }) {
-    const fills = [
-      pal.chipBg,
-      pal.accent + '33',
-      pal.accent + '88',
-      pal.accent,
-    ];
-    const label = SCHEDULE_LABELS[load] || 'Open';
-    return (
-      <div onClick={onClick}
-        title={onClick ? `${label} — click to change` : label}
-        style={{
-          height: 32, borderRadius: 5,
-          background: fills[load],
-          border: `1px solid ${load === 0 ? pal.borderSoft : 'transparent'}`,
-          cursor: onClick ? 'pointer' : 'default',
-          userSelect: 'none',
-        }} />
-    );
-  }
-  function LegendDot({ pal, load, label }) {
-    const fills = [pal.chipBg, pal.accent + '33', pal.accent + '88', pal.accent];
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        <span style={{ width: 10, height: 10, borderRadius: 3,
-          background: fills[load], border: `1px solid ${load === 0 ? pal.border : 'transparent'}` }} />
-        {label}
-      </span>
     );
   }
 
@@ -908,6 +1161,7 @@
           const editable = a.source === 'supabase' && a._id;
           const key = (a._id || a.schoolId || a.school || 'row') + ':' + (a.startDate || i);
           const onClick = editable && onRowClick ? () => onRowClick(a) : null;
+          const attachCount = Array.isArray(a.attachments) ? a.attachments.length : 0;
           const baseRow = {
             color: pal.text, fontWeight: 500, minWidth: 0,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -915,10 +1169,24 @@
           };
           return (
             <React.Fragment key={key}>
-              <div onClick={onClick} style={baseRow}>
-                {a.school || (a.districtName ? `${a.districtName} (district-wide)` : '—')}
+              <div onClick={onClick} style={{ ...baseRow, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {a.school || (a.districtName ? `${a.districtName} (district-wide)` : '—')}
+                </span>
+                {attachCount > 0 && (
+                  <span title={`${attachCount} attachment${attachCount === 1 ? '' : 's'}`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 2,
+                      flexShrink: 0, fontSize: 10, fontWeight: 600,
+                      color: pal.textSoft, padding: '1px 5px', borderRadius: 3,
+                      background: pal.chipBg,
+                    }}>
+                    <Icon name="file" size={9.5} stroke={2} />
+                    {attachCount}
+                  </span>
+                )}
                 {a.source === 'mock' && (
-                  <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700,
+                  <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 700,
                     color: pal.textFaint, background: pal.chipBg,
                     padding: '1px 5px', borderRadius: 3, letterSpacing: 0.4 }}>SEED</span>
                 )}
@@ -947,10 +1215,11 @@
       schoolId: null, schoolName: '',
       districtId: null, districtName: '',
       spec: '',
-      directHours: 0, indirectHours: 0,
+      directHours: 0, indirectHours: 0, indirectOverride: false,
       payRate: null, billRate: null,
       startDate: '', endDate: '',
       status: 'active', note: '',
+      attachments: [],
       ...assignment,
     });
     const [scopeOpen, setScopeOpen] = React.useState(!draft.schoolName && !draft.districtName);
@@ -1037,10 +1306,16 @@
     const handleSave = () => {
       if (!ownerLabel) { setScopeOpen(true); return; }
       if (!draft.startDate) return;
+      const direct = Number(draft.directHours) || 0;
+      // Server-side re-derives, but normalize here so the UI shows the same
+      // value the moment it saves.
+      const indirect = draft.indirectOverride
+        ? (Number(draft.indirectHours) || 0)
+        : window.AssignmentsStore.autoIndirect(direct);
       onSave({
         ...draft,
-        directHours:   Number(draft.directHours) || 0,
-        indirectHours: Number(draft.indirectHours) || 0,
+        directHours:   direct,
+        indirectHours: indirect,
         payRate:  draft.payRate  != null && draft.payRate  !== '' ? Number(draft.payRate)  : null,
         billRate: draft.billRate != null && draft.billRate !== '' ? Number(draft.billRate) : null,
       });
@@ -1128,17 +1403,57 @@
               </select>
             </div>
 
-            {/* Hours */}
+            {/* Hours — indirect auto-calcs at 25% of direct until overridden. */}
             <div style={s.row}>
               <div>
                 <div style={s.label}>Direct hours / week</div>
                 <input type="number" min="0" step="0.5" style={s.input}
-                  value={draft.directHours} onChange={(e) => set({ directHours: e.target.value })} />
+                  value={draft.directHours}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDraft((d) => ({
+                      ...d,
+                      directHours: v,
+                      indirectHours: d.indirectOverride
+                        ? d.indirectHours
+                        : (window.AssignmentsStore.autoIndirect(v)),
+                    }));
+                  }} />
               </div>
               <div>
-                <div style={s.label}>Indirect hours / week</div>
-                <input type="number" min="0" step="0.5" style={s.input}
-                  value={draft.indirectHours} onChange={(e) => set({ indirectHours: e.target.value })} />
+                <div style={{ ...s.label, display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                  <span style={{ flex: 1 }}>
+                    {draft.indirectOverride ? 'Override indirect hours' : 'Indirect hours / week'}
+                  </span>
+                  {draft.indirectOverride ? (
+                    <button onClick={() => {
+                      setDraft((d) => ({
+                        ...d,
+                        indirectOverride: false,
+                        indirectHours: window.AssignmentsStore.autoIndirect(d.directHours),
+                      }));
+                    }} style={{
+                      background: 'transparent', border: 'none',
+                      color: pal.accent, fontSize: 10.5, fontWeight: 600,
+                      textTransform: 'none', letterSpacing: 0,
+                      cursor: 'pointer', padding: 0, fontFamily: 'inherit',
+                    }}>Reset to auto</button>
+                  ) : (
+                    <span style={{
+                      fontSize: 10, fontWeight: 500, color: pal.textFaint,
+                      textTransform: 'none', letterSpacing: 0,
+                    }}>auto · 25% of direct</span>
+                  )}
+                </div>
+                <input type="number" min="0" step="0.25"
+                  style={{
+                    ...s.input,
+                    background: draft.indirectOverride ? pal.cardAlt : (pal.chipBg || pal.cardAlt),
+                    color: draft.indirectOverride ? pal.text : pal.textSoft,
+                  }}
+                  value={draft.indirectHours}
+                  onChange={(e) => set({ indirectHours: e.target.value, indirectOverride: true })}
+                  onFocus={(e) => { if (!draft.indirectOverride) e.target.select(); }} />
               </div>
             </div>
 
@@ -1186,6 +1501,13 @@
               </div>
             </div>
 
+            {/* Assignment documents & links */}
+            <AssignmentAttachments
+              attachments={draft.attachments || []}
+              onChange={(next) => set({ attachments: next })}
+              pal={pal}
+            />
+
             {/* Notes */}
             <div>
               <div style={s.label}>Notes</div>
@@ -1219,6 +1541,268 @@
         paddingBottom: 6,
       }}>{children}</div>
     );
+  }
+
+  // ─── Assignment documents & links ────────────────────────────────────────
+  // Reuses window.attachmentHelpers (same Supabase Storage bucket as task /
+  // renewal attachments). Each attachment also supports inline notes so the
+  // team can tag what each doc is (e.g. "signed addendum", "IEP roster").
+  function AssignmentAttachments({ attachments, onChange, pal }) {
+    const helpers = window.attachmentHelpers || {};
+    const KIND_META = helpers.KIND_META || {};
+    const [adding, setAdding] = React.useState(false);
+    const [url, setUrl] = React.useState('');
+    const [name, setName] = React.useState('');
+    const [linkNotes, setLinkNotes] = React.useState('');
+    const [uploading, setUploading] = React.useState(null);
+    const [uploadError, setUploadError] = React.useState(null);
+    const urlRef = React.useRef(null);
+    const fileInputRef = React.useRef(null);
+
+    React.useEffect(() => { if (adding && urlRef.current) urlRef.current.focus(); }, [adding]);
+
+    const resetLink = () => { setAdding(false); setUrl(''); setName(''); setLinkNotes(''); };
+    const commitLink = () => {
+      const trimmed = url.trim();
+      if (!trimmed) return;
+      const finalName = name.trim() || (helpers.defaultAttachmentName ? helpers.defaultAttachmentName(trimmed) : trimmed);
+      const kind = helpers.detectAttachmentKind ? helpers.detectAttachmentKind(trimmed, finalName) : 'link';
+      onChange([...attachments, {
+        id: helpers.attachmentId ? helpers.attachmentId() : 'a' + Date.now(),
+        kind, url: trimmed, name: finalName,
+        notes: linkNotes.trim(),
+        addedAt: Date.now(),
+        source: 'link',
+      }]);
+      resetLink();
+    };
+
+    const triggerFilePicker = () => {
+      setUploadError(null);
+      if (fileInputRef.current) fileInputRef.current.click();
+    };
+    const onFileSelected = async (event) => {
+      const file = event.target.files && event.target.files[0];
+      event.target.value = '';
+      if (!file) return;
+      const problem = helpers.validateUpload ? helpers.validateUpload(file) : null;
+      if (problem) { setUploadError(problem); return; }
+      setUploading(file.name);
+      setUploadError(null);
+      try {
+        const att = await helpers.uploadAttachmentFile(file);
+        onChange([...attachments, { ...att, notes: '' }]);
+      } catch (err) {
+        console.warn('assignment upload failed', err);
+        setUploadError((err && err.message) ? err.message : 'Upload failed.');
+      } finally {
+        setUploading(null);
+      }
+    };
+
+    const remove = async (id) => {
+      const target = attachments.find((a) => a.id === id);
+      onChange(attachments.filter((a) => a.id !== id));
+      if (target && target.storagePath && helpers.deleteAttachmentFile) {
+        await helpers.deleteAttachmentFile(target);
+      }
+    };
+
+    const updateNotes = (id, notes) => {
+      onChange(attachments.map((a) => a.id === id ? { ...a, notes } : a));
+    };
+
+    const openAttachment = (a) => {
+      if (a.source === 'upload' && helpers.openUploadedAttachment) {
+        helpers.openUploadedAttachment(a);
+      } else if (a.url) {
+        window.open(a.url, '_blank', 'noreferrer');
+      }
+    };
+
+    return (
+      <div>
+        <div style={{
+          fontSize: 11, fontWeight: 600, letterSpacing: 0.4,
+          textTransform: 'uppercase', color: pal.textFaint, marginBottom: 5,
+        }}>
+          Assignment documents &amp; links
+          <span style={{ textTransform: 'none', fontWeight: 500, color: pal.textFaint, marginLeft: 6 }}>
+            · tied to this assignment only
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {attachments.map((a) => {
+            const meta = KIND_META[a.kind] || KIND_META.link || { abbr: 'LINK', full: 'Link', color: pal.textSoft };
+            const isUpload = a.source === 'upload';
+            const sub = isUpload
+              ? `${meta.full} · ${helpers.formatBytes ? helpers.formatBytes(a.size) : ''}`
+              : `${meta.full}${a.url ? ' · ' + hostOf(a.url) : ''}`;
+            return (
+              <div key={a.id} style={{
+                display: 'flex', flexDirection: 'column', gap: 4,
+                padding: '7px 10px',
+                background: pal.cardAlt,
+                border: `1px solid ${pal.border}`, borderRadius: 7,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{
+                    flexShrink: 0,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    minWidth: 44, padding: '3px 7px',
+                    background: meta.color + '20', color: meta.color,
+                    fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6,
+                    borderRadius: 4, fontFamily: 'ui-monospace, monospace',
+                  }}>{meta.abbr}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openAttachment(a); }}
+                      style={{
+                        fontSize: 12.5, color: pal.text, fontWeight: 500,
+                        textDecoration: 'none', display: 'block',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        background: 'transparent', border: 'none', padding: 0,
+                        cursor: 'pointer', textAlign: 'left', width: '100%',
+                        fontFamily: 'inherit',
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.color = pal.accent}
+                      onMouseLeave={(e) => e.currentTarget.style.color = pal.text}>
+                      {a.name}
+                    </button>
+                    <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 1,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>
+                  </div>
+                  <button onClick={() => remove(a.id)} title="Remove"
+                    style={{
+                      border: 'none', background: 'transparent',
+                      color: pal.textFaint, fontSize: 16, lineHeight: 1,
+                      cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = pal.warn; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = pal.textFaint; }}>×</button>
+                </div>
+                <input
+                  placeholder="Notes (optional)"
+                  value={a.notes || ''}
+                  onChange={(e) => updateNotes(a.id, e.target.value)}
+                  style={{
+                    width: '100%', padding: '4px 8px',
+                    fontSize: 11.5, color: pal.textSoft,
+                    background: pal.card,
+                    border: `1px solid ${pal.borderSoft}`, borderRadius: 5,
+                    outline: 'none', fontFamily: 'inherit',
+                  }}
+                />
+              </div>
+            );
+          })}
+
+          {adding ? (
+            <div style={{
+              padding: 10, background: pal.cardAlt,
+              border: `1px dashed ${pal.border}`, borderRadius: 7,
+              display: 'flex', flexDirection: 'column', gap: 7,
+            }}>
+              <input
+                ref={urlRef}
+                placeholder="Paste URL — share link to PDF, contract, IEP…"
+                value={url} onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitLink(); } if (e.key === 'Escape') resetLink(); }}
+                style={{
+                  width: '100%', padding: '7px 10px',
+                  fontSize: 12.5, color: pal.text, background: pal.card,
+                  border: `1px solid ${pal.border}`, borderRadius: 6,
+                  outline: 'none', fontFamily: 'inherit',
+                }}
+              />
+              <input
+                placeholder="Display name (optional)"
+                value={name} onChange={(e) => setName(e.target.value)}
+                style={{
+                  width: '100%', padding: '7px 10px',
+                  fontSize: 12.5, color: pal.text, background: pal.card,
+                  border: `1px solid ${pal.border}`, borderRadius: 6,
+                  outline: 'none', fontFamily: 'inherit',
+                }}
+              />
+              <input
+                placeholder="Notes (optional)"
+                value={linkNotes} onChange={(e) => setLinkNotes(e.target.value)}
+                style={{
+                  width: '100%', padding: '7px 10px',
+                  fontSize: 12.5, color: pal.text, background: pal.card,
+                  border: `1px solid ${pal.border}`, borderRadius: 6,
+                  outline: 'none', fontFamily: 'inherit',
+                }}
+              />
+              <div style={{ display: 'flex', gap: 7 }}>
+                <span style={{ flex: 1 }} />
+                <button onClick={resetLink}
+                  style={{
+                    padding: '0 12px',
+                    background: 'transparent', color: pal.textSoft,
+                    border: `1px solid ${pal.border}`, borderRadius: 6,
+                    fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+                  }}>Cancel</button>
+                <button onClick={commitLink} disabled={!url.trim()}
+                  style={{
+                    padding: '0 14px',
+                    background: url.trim() ? pal.accent : pal.chipBg,
+                    color: url.trim() ? '#fff' : pal.textFaint,
+                    border: 'none', borderRadius: 6,
+                    fontSize: 12, fontWeight: 600,
+                    cursor: url.trim() ? 'pointer' : 'default', fontFamily: 'inherit',
+                  }}>Add link</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={triggerFilePicker} disabled={!!uploading}
+                style={dashedBtn(pal, !!uploading)}>
+                <Icon name="file" size={12} stroke={2} />
+                {uploading ? `Uploading ${uploading}…` : 'Upload file'}
+              </button>
+              <button onClick={() => setAdding(true)} disabled={!!uploading}
+                style={dashedBtn(pal, !!uploading)}>
+                <Icon name="plus" size={12} stroke={2.4} /> Add link
+              </button>
+            </div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={helpers.UPLOAD_ACCEPT || '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt'}
+            onChange={onFileSelected}
+            style={{ display: 'none' }}
+          />
+          {uploadError && (
+            <div style={{
+              fontSize: 11.5, color: pal.warn,
+              padding: '6px 10px',
+              border: `1px solid ${pal.warn}`,
+              borderRadius: 6, marginTop: 2,
+            }}>{uploadError}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  function dashedBtn(pal, disabled) {
+    return {
+      flex: 1, padding: '8px 12px',
+      background: 'transparent',
+      color: disabled ? pal.textFaint : pal.textSoft,
+      border: `1px dashed ${pal.border}`,
+      borderRadius: 7,
+      fontSize: 12.5, fontWeight: 500,
+      cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+    };
+  }
+  function hostOf(url) {
+    try { return new URL(url).hostname.replace(/^www\./, ''); }
+    catch (e) { return ''; }
   }
 
   // Contractor renewals — one card per kind (license / insurance / background)
