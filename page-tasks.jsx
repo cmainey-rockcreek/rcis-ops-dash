@@ -163,7 +163,7 @@
           <MetricCard pal={pal} label="Done this week" value={counts.doneThisWeek} tone="#3E8A57" />
         </div>
 
-        <Filters pal={pal} team={team} filters={filters} setFilter={setFilter} clearFilters={clearFilters} />
+        <Filters pal={pal} team={team} filters={filters} setFilter={setFilter} clearFilters={clearFilters} todos={todos} />
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 12, minHeight: 0 }}>
           <div style={{
@@ -235,9 +235,60 @@
     );
   }
 
-  function Filters({ pal, team, filters, setFilter, clearFilters }) {
+  function Filters({ pal, team, filters, setFilter, clearFilters, todos }) {
     const currentUser = window.TeamStore && window.TeamStore.current && window.TeamStore.current();
     const myActive = !!(currentUser && filters.owner === currentUser.id);
+
+    // Live counts for each quick-filter chip — computed against the full
+    // todos list, independent of other filters. Always counts "open"
+    // (anything not Done) so chips reflect what's still actionable.
+    const isOpen = (t) => t.column !== 'done';
+    const chipCounts = React.useMemo(() => ({
+      mine:      currentUser ? todos.filter((t) => isOpen(t) && (t.owners || []).includes(currentUser.id)).length : 0,
+      overdue:   todos.filter((t) => isOpen(t) && isOverdue(t.due)).length,
+      today:     todos.filter((t) => isOpen(t) && isToday(t.due)).length,
+      week:      todos.filter((t) => isOpen(t) && isDueThisWeek(t.due)).length,
+      attention: todos.filter((t) => t.column === 'attention').length,
+    }), [todos, currentUser && currentUser.id]);
+
+    // "All" is active when no chip-controlled dimension is set.
+    const dueActive       = filters.due === 'overdue' || filters.due === 'today' || filters.due === 'week';
+    const attentionActive = filters.status === 'attention';
+    const allActive       = !dueActive && !attentionActive;
+    const setQuickDue = (key) => {
+      // Toggling the same chip clears it back to "All".
+      const next = filters.due === key ? 'all' : key;
+      setFilter('due', next);
+      // Quick chips imply open scope; nudge status back to 'open' if it
+      // had drifted to 'attention'.
+      if (next !== 'all' && filters.status === 'attention') setFilter('status', 'open');
+    };
+    const setAttention = () => {
+      const next = filters.status === 'attention' ? 'open' : 'attention';
+      setFilter('status', next);
+      if (next === 'attention' && filters.due !== 'all') setFilter('due', 'all');
+    };
+    const setAll = () => {
+      if (filters.due !== 'all')         setFilter('due', 'all');
+      if (filters.status === 'attention') setFilter('status', 'open');
+    };
+
+    const chipStyle = (active, tone) => ({
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      height: 26, padding: '0 10px',
+      background: active ? (tone || pal.accent) : 'transparent',
+      color: active ? '#fff' : pal.textSoft,
+      border: `1px solid ${active ? (tone || pal.accent) : pal.border}`,
+      borderRadius: 14,
+      fontSize: 12, fontWeight: 600,
+      cursor: 'pointer', fontFamily: 'inherit',
+      whiteSpace: 'nowrap',
+    });
+    const countStyle = (active) => ({
+      fontSize: 10, fontWeight: 700,
+      color: active ? '#ffffffcc' : pal.textFaint,
+      fontVariantNumeric: 'tabular-nums',
+    });
 
     const inputStyle = {
       height: 34,
@@ -262,32 +313,42 @@
         borderRadius: 10,
         padding: 10,
       }}>
-        {currentUser && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {/* Quick filter chips — most common slices at one click. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          {currentUser && (
             <button
               onClick={() => setFilter('owner', myActive ? 'all' : currentUser.id)}
               title={myActive ? 'Showing only your tasks. Click to clear.' : 'Show only tasks assigned to you.'}
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                height: 26,
-                padding: '0 10px 0 4px',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                height: 26, padding: '0 10px 0 4px',
                 background: myActive ? pal.accent : 'transparent',
                 color: myActive ? '#fff' : pal.textSoft,
                 border: `1px solid ${myActive ? pal.accent : pal.border}`,
                 borderRadius: 14,
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
+                fontSize: 12, fontWeight: 700,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}>
               <OwnerAvatar id={currentUser.id} size={18} ring={myActive ? pal.accent : pal.card} />
               My tasks
+              <span style={countStyle(myActive)}>{chipCounts.mine}</span>
             </button>
-          </div>
-        )}
+          )}
+          <span style={{ width: 1, height: 18, background: pal.border, margin: '0 2px' }} />
+          <button onClick={setAll} style={chipStyle(allActive, null)}>All</button>
+          <button onClick={() => setQuickDue('overdue')} style={chipStyle(filters.due === 'overdue', '#E76B5D')}>
+            Overdue <span style={countStyle(filters.due === 'overdue')}>{chipCounts.overdue}</span>
+          </button>
+          <button onClick={() => setQuickDue('today')} style={chipStyle(filters.due === 'today', '#C98A2C')}>
+            Due today <span style={countStyle(filters.due === 'today')}>{chipCounts.today}</span>
+          </button>
+          <button onClick={() => setQuickDue('week')} style={chipStyle(filters.due === 'week', null)}>
+            This week <span style={countStyle(filters.due === 'week')}>{chipCounts.week}</span>
+          </button>
+          <button onClick={setAttention} style={chipStyle(attentionActive, '#C98A2C')}>
+            Needs attention <span style={countStyle(attentionActive)}>{chipCounts.attention}</span>
+          </button>
+        </div>
         <div style={{
           display: 'grid',
           gridTemplateColumns: '1.7fr .9fr .9fr .9fr 1fr .9fr auto',
