@@ -86,10 +86,11 @@
       <div style={{
         flex: 1, padding: '20px 24px',
         display: 'flex', flexDirection: 'column', gap: 14,
-        overflowY: 'auto',
+        overflow: 'hidden',
+        minHeight: 0,
       }}>
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>Contractors</h1>
           <span style={{ fontSize: 13, color: pal.textSoft }}>
             {sortedFiltered.length} of {window.RCIS_DATA.CONTRACTORS.length}
@@ -105,7 +106,7 @@
         </div>
 
         {/* Filter row */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
             padding: '8px 12px',
@@ -152,10 +153,14 @@
           </div>
         </div>
 
-        {/* Table */}
+        {/* Table — its own scroll container so the header + filters stay
+            put while you page through long contractor lists. */}
         <div style={{
           background: pal.card, border: `1px solid ${pal.border}`,
-          borderRadius: 10, overflow: 'hidden',
+          borderRadius: 10,
+          flex: 1, minHeight: 0,
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
         }}>
           <div style={{
             display: 'grid',
@@ -166,6 +171,7 @@
             borderBottom: `1px solid ${pal.border}`,
             fontSize: 10, fontWeight: 700, letterSpacing: 0.6,
             color: pal.textFaint, textTransform: 'uppercase',
+            flexShrink: 0,
           }}>
             <span />
             <SortHeader pal={pal} sort={sort} setSort={setSort} k="name"   label="Name" />
@@ -175,16 +181,18 @@
             <SortHeader pal={pal} sort={sort} setSort={setSort} k="status" label="Status" />
           </div>
 
-          {sortedFiltered.length === 0 ? (
-            <div style={{
-              padding: '40px 14px', textAlign: 'center',
-              color: pal.textFaint, fontSize: 13,
-            }}>No contractors match your filters.</div>
-          ) : (
-            sortedFiltered.map((c) => (
-              <ContractorRow key={c.id} c={c} pal={pal} />
-            ))
-          )}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {sortedFiltered.length === 0 ? (
+              <div style={{
+                padding: '40px 14px', textAlign: 'center',
+                color: pal.textFaint, fontSize: 13,
+              }}>No contractors match your filters.</div>
+            ) : (
+              sortedFiltered.map((c) => (
+                <ContractorRow key={c.id} c={c} pal={pal} />
+              ))
+            )}
+          </div>
         </div>
       </div>
     );
