@@ -873,76 +873,94 @@
       <window.PageShell dark={dark} activePage="home">
         {(pal) => (
           <div style={{
-            flex: 1, padding: '20px 24px',
-            display: 'flex', flexDirection: 'column', gap: 14,
-            overflowY: 'auto',
+            flex: 1, minHeight: 0,
+            display: 'flex', flexDirection: 'column',
           }}>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>
-                {greeting}, {firstName}
+            {/* Pinned: greeting + Quick stats. Stays put while the rest scrolls. */}
+            <div style={{
+              padding: '20px 24px 0',
+              display: 'flex', flexDirection: 'column', gap: 14,
+              flexShrink: 0,
+              background: pal.page,
+              borderBottom: `1px solid ${pal.borderSoft}`,
+            }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>
+                  {greeting}, {firstName}
+                </div>
+                <div style={{ fontSize: 12.5, color: pal.textSoft, marginTop: 2 }}>
+                  {today}
+                  {urgentGapsCount > 0 && (
+                    <>
+                      {' · '}
+                      <span style={{ color: pal.warn, fontWeight: 600 }}>
+                        {urgentGapsCount} urgent gap{urgentGapsCount === 1 ? '' : 's'}
+                      </span>
+                    </>
+                  )}
+                  {renewalsSoonCount > 0 && (
+                    <>{' · '}{renewalsSoonCount} renewal{renewalsSoonCount === 1 ? '' : 's'} due in 30 days</>
+                  )}
+                  {urgentGapsCount === 0 && renewalsSoonCount === 0 && (
+                    <> · <span style={{ color: pal.textFaint }}>nothing urgent today</span></>
+                  )}
+                </div>
               </div>
-              <div style={{ fontSize: 12.5, color: pal.textSoft, marginTop: 2 }}>
-                {today}
-                {urgentGapsCount > 0 && (
-                  <>
-                    {' · '}
-                    <span style={{ color: pal.warn, fontWeight: 600 }}>
-                      {urgentGapsCount} urgent gap{urgentGapsCount === 1 ? '' : 's'}
-                    </span>
-                  </>
-                )}
-                {renewalsSoonCount > 0 && (
-                  <>{' · '}{renewalsSoonCount} renewal{renewalsSoonCount === 1 ? '' : 's'} due in 30 days</>
-                )}
-                {urgentGapsCount === 0 && renewalsSoonCount === 0 && (
-                  <> · <span style={{ color: pal.textFaint }}>nothing urgent today</span></>
-                )}
-              </div>
+
+              {show('stats') && (
+                <CollapsibleSection pal={pal} title="Quick stats" collapseKey="stats">
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <StatTile pal={pal} label="Annual revenue"
+                      value={fmtCompact.format(totalAnnualRev || 0)}
+                      deltaSub="active assignments · 36-wk year" />
+                    <StatTile pal={pal} label="Active contractors"
+                      value={String(activeContractorsCount)}
+                      deltaSub={`of ${contractors.length} total`} />
+                    <StatTile pal={pal} label="Open coverage"
+                      value={String(openGapsCount)}
+                      delta={urgentGapsCount > 0 ? String(urgentGapsCount) : null}
+                      deltaTone={urgentGapsCount > 0 ? 'neg' : 'neutral'}
+                      deltaSub={urgentGapsCount > 0 ? `${urgentGapsCount} urgent` : 'none urgent'} />
+                    <StatTile pal={pal} label="Renewals at risk"
+                      value={String(renewalsAtRiskCount)}
+                      deltaTone={renewalsAtRiskCount > 0 ? 'neg' : 'neutral'}
+                      deltaSub="overdue + ≤30d" />
+                    <StatTile pal={pal} label="Booked this week"
+                      value={`${Math.round(weeklyBookedHours)}h`}
+                      deltaSub="across active assignments" />
+                  </div>
+                </CollapsibleSection>
+              )}
+              {/* Bottom padding so pinned-region content doesn't hug the divider. */}
+              <div style={{ height: 4, flexShrink: 0 }} />
             </div>
 
-            {show('stats') && (
-              <CollapsibleSection pal={pal} title="Quick stats" collapseKey="stats">
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <StatTile pal={pal} label="Annual revenue"
-                    value={fmtCompact.format(totalAnnualRev || 0)}
-                    deltaSub="active assignments · 36-wk year" />
-                  <StatTile pal={pal} label="Active contractors"
-                    value={String(activeContractorsCount)}
-                    deltaSub={`of ${contractors.length} total`} />
-                  <StatTile pal={pal} label="Open coverage"
-                    value={String(openGapsCount)}
-                    delta={urgentGapsCount > 0 ? String(urgentGapsCount) : null}
-                    deltaTone={urgentGapsCount > 0 ? 'neg' : 'neutral'}
-                    deltaSub={urgentGapsCount > 0 ? `${urgentGapsCount} urgent` : 'none urgent'} />
-                  <StatTile pal={pal} label="Renewals at risk"
-                    value={String(renewalsAtRiskCount)}
-                    deltaTone={renewalsAtRiskCount > 0 ? 'neg' : 'neutral'}
-                    deltaSub="overdue + ≤30d" />
-                  <StatTile pal={pal} label="Booked this week"
-                    value={`${Math.round(weeklyBookedHours)}h`}
-                    deltaSub="across active assignments" />
+            {/* Scrolling region: Kanban, coverage/capacity, renewals. */}
+            <div style={{
+              flex: 1, minHeight: 0,
+              padding: '14px 24px 20px',
+              display: 'flex', flexDirection: 'column', gap: 14,
+              overflowY: 'auto',
+            }}>
+              {show('kanban') && (
+                <div style={{ display: 'flex' }}>
+                  <Kanban pal={pal} />
                 </div>
-              </CollapsibleSection>
-            )}
+              )}
 
-            {show('kanban') && (
-              <div style={{ display: 'flex' }}>
-                <Kanban pal={pal} />
-              </div>
-            )}
+              {(show('gaps') || show('capacity')) && (
+                <div style={{ display: 'grid', gridTemplateColumns: show('gaps') && show('capacity') ? '1fr 1fr' : '1fr', gap: 12 }}>
+                  {show('gaps') && <CoverageGaps pal={pal} />}
+                  {show('capacity') && <CapacityNow pal={pal} />}
+                </div>
+              )}
 
-            {(show('gaps') || show('capacity')) && (
-              <div style={{ display: 'grid', gridTemplateColumns: show('gaps') && show('capacity') ? '1fr 1fr' : '1fr', gap: 12 }}>
-                {show('gaps') && <CoverageGaps pal={pal} />}
-                {show('capacity') && <CapacityNow pal={pal} />}
-              </div>
-            )}
-
-            {show('renewals') && (
-              <div>
-                <Renewals pal={pal} />
-              </div>
-            )}
+              {show('renewals') && (
+                <div>
+                  <Renewals pal={pal} />
+                </div>
+              )}
+            </div>
           </div>
         )}
       </window.PageShell>
