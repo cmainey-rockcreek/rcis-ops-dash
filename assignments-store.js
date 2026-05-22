@@ -173,6 +173,15 @@ window.AssignmentsStore = (() => {
         if (a.endDate < today && a.status === 'active') a.status = 'completed';
       }
       setState([a, ...state]);
+      // Make sure SpecSettingsStore has had a chance to load before we
+      // persist the auto-derived indirect — otherwise a cold start would
+      // bake in the 0.25 default and ignore the admin-configured ratio.
+      if (window.SpecSettingsStore && window.SpecSettingsStore.ready) {
+        await window.SpecSettingsStore.ready();
+        if (!a.indirectOverride) {
+          a.indirectHours = autoIndirect(a.directHours, a.spec);
+        }
+      }
       const row = toRow(a);
       const { error } = await window.sb.from(TABLE).insert(row);
       if (error) {
@@ -196,6 +205,14 @@ window.AssignmentsStore = (() => {
         if (next.endDate < today && next.status === 'active') next.status = 'completed';
       }
       setState(state.map((a) => a.id === id ? next : a));
+      // Same cold-start guard as add(): make sure the persisted indirect
+      // uses the current per-spec ratio, not the 0.25 default.
+      if (window.SpecSettingsStore && window.SpecSettingsStore.ready) {
+        await window.SpecSettingsStore.ready();
+        if (!next.indirectOverride) {
+          next.indirectHours = autoIndirect(next.directHours, next.spec);
+        }
+      }
       const row = toRow(next);
       delete row.id;
       const { error } = await window.sb.from(TABLE).update(row).eq('id', id);
@@ -231,14 +248,17 @@ window.useAssignments = function useAssignments() {
 // attachments? }.
 window.useContractorAssignments = function useContractorAssignments(c) {
   const persisted = window.useAssignments();
+  // Subscribe so admin's per-spec ratio edits flow through to indirect /
+  // revenue / margin instead of being trapped behind the memo.
+  const specSettings = window.useSpecSettings ? window.useSpecSettings() : null;
   return React.useMemo(() => {
     // Mock seed rows don't carry a spec — borrow the contractor's so Net
     // Margin can subtract burden the same way it does for real assignments.
     const mock = (c && c.assignments) ? c.assignments.map((m) => ({ ...m, spec: m.spec || (c && c.spec) || '', source: 'mock' })) : [];
     const real = persisted.filter((a) => a.contractorId === (c && c.id)).map((a) => {
       const direct = Number(a.directHours) || 0;
-      // If the user hasn't overridden, the store already keeps indirect in
-      // sync at 25% of direct — fall through here for old rows just in case.
+      // Re-derive at render time using the current per-spec ratio; the
+      // stored indirect_hours is just a cache of "last computed."
       const indirect = a.indirectOverride
         ? (Number(a.indirectHours) || 0)
         : window.AssignmentsStore.autoIndirect(direct, a.spec);
@@ -263,5 +283,5 @@ window.useContractorAssignments = function useContractorAssignments(c) {
       };
     });
     return [...real, ...mock];
-  }, [c, persisted]);
+  }, [c, persisted, specSettings]);
 };

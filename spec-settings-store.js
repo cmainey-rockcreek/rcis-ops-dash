@@ -51,13 +51,30 @@ window.SpecSettingsStore = (() => {
     emit();
   }
 
+  // First-load gate — lets callers (e.g. AssignmentsStore.add) await the
+  // initial network load before persisting auto-derived values that depend
+  // on per-spec ratios. Resolves on first successful load, on a load error,
+  // or after a 2s safety timeout (so we never hang a save).
+  let firstLoadResolved = false;
+  const firstLoadWaiters = [];
+  let firstLoadPromise = new Promise((resolve) => {
+    firstLoadWaiters.push(resolve);
+    setTimeout(() => { settleFirstLoad(); }, 2000);
+  });
+  function settleFirstLoad() {
+    if (firstLoadResolved) return;
+    firstLoadResolved = true;
+    firstLoadWaiters.splice(0).forEach((fn) => fn());
+  }
+
   async function load() {
-    if (!window.sb) return;
+    if (!window.sb) { settleFirstLoad(); return; }
     const { data, error } = await window.sb.from(TABLE).select('*');
-    if (error) { console.warn('spec_settings load failed', error); return; }
+    if (error) { console.warn('spec_settings load failed', error); settleFirstLoad(); return; }
     const next = {};
     (data || []).forEach((r) => { const o = fromRow(r); next[o.specCode] = o; });
     setState(next);
+    settleFirstLoad();
   }
 
   let channel = null;
@@ -112,6 +129,11 @@ window.SpecSettingsStore = (() => {
     },
 
     reload: load,
+
+    // Resolves once the initial load (or its safety timeout) has settled.
+    // Callers that need the freshest ratio/burden before persisting derived
+    // values (e.g. AssignmentsStore.add) should await this.
+    ready() { return firstLoadPromise; },
 
     DEFAULT_INDIRECT_RATIO,
     DEFAULT_BURDEN,

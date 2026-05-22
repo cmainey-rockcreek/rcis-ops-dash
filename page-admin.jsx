@@ -354,7 +354,7 @@
                 width: 'fit-content',
               }}>{sp.code}</span>
               <span style={{ fontSize: 12.5, color: pal.text }}>{sp.name}</span>
-              <NumberCell pal={pal} value={ratio} step="0.01" min="0" max="2"
+              <NumberCell pal={pal} value={ratio} step="1" min="0" max="200"
                 suffix="%" displayTransform={(v) => `${Math.round(Number(v) * 100)}`}
                 parse={(v) => Number(v) / 100}
                 title="Indirect hours auto-derive as direct × this ratio."
@@ -389,7 +389,11 @@
       if (raw === '') { setEditing(false); return; }
       const parsed = parse ? parse(raw) : Number(raw);
       if (!Number.isFinite(parsed)) { setEditing(false); return; }
-      if (parsed !== Number(value)) onSave(parsed);
+      // Compare in display space — comparing parsed-vs-Number(value) trips
+      // false positives whenever displayTransform is lossy (e.g. Math.round
+      // for ratios), causing a plain click-then-blur to overwrite a stored
+      // 0.305 with 0.31 even though the user typed nothing.
+      if (raw !== display) onSave(parsed);
       setEditing(false);
     };
     const cancel = () => { setDraft(display); setEditing(false); };
