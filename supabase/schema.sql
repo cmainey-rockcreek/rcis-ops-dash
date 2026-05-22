@@ -512,6 +512,12 @@ drop policy if exists "users can update own team profile" on public.team_profile
 create policy "users can update own team profile" on public.team_profiles
   for update to authenticated using (auth.uid() = id) with check (auth.uid() = id);
 
+-- Admin page edits other teammates' rows (rename, role, initials, color,
+-- active toggle). Trusted internal team — every signed-in user is an admin.
+drop policy if exists "team can update team profiles" on public.team_profiles;
+create policy "team can update team profiles" on public.team_profiles
+  for update to authenticated using (true) with check (true);
+
 drop policy if exists "team full access" on public.contacts;
 create policy "team full access" on public.contacts
   for all to authenticated using (true) with check (true);

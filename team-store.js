@@ -41,6 +41,7 @@
       role: row.role || 'Team',
       initials: row.initials || initialsFor(name, row.email),
       color: row.color || colorFor(row.id || row.email),
+      active: row.active !== false,
       source: 'live',
     };
   }
@@ -55,7 +56,13 @@
   }
 
   function assignableMembers() {
-    return profiles.length ? profiles : FALLBACK_TEAM;
+    const live = profiles.filter((p) => p.active);
+    return live.length ? live : FALLBACK_TEAM;
+  }
+
+  // All persisted profiles regardless of `active` — admin page edits this.
+  function liveProfiles() {
+    return profiles.slice();
   }
 
   function currentMember() {
@@ -81,7 +88,6 @@
     const { data, error } = await window.sb
       .from('team_profiles')
       .select('id,email,full_name,role,initials,color,active')
-      .eq('active', true)
       .order('full_name', { ascending: true });
 
     if (error) {
@@ -149,18 +155,45 @@
       if (!loaded) load();
       return () => { listeners.delete(listener); };
     }, []);
-    return kind === 'all' ? allMembers() : assignableMembers();
+    if (kind === 'all') return allMembers();
+    if (kind === 'admin') return liveProfiles();
+    return assignableMembers();
+  }
+
+  // Optimistic patch on a profile row (name, role, initials, color, active).
+  // Lets the admin page do inline edits without re-fetching after each save.
+  async function updateProfile(id, patch) {
+    if (!id || !window.sb) return;
+    const fields = {};
+    if (patch.name != null)     fields.full_name = patch.name;
+    if (patch.role != null)     fields.role     = patch.role;
+    if (patch.initials != null) fields.initials = patch.initials;
+    if (patch.color != null)    fields.color    = patch.color;
+    if (patch.active != null)   fields.active   = !!patch.active;
+    if (Object.keys(fields).length === 0) return;
+
+    profiles = profiles.map((p) => p.id === id ? { ...p, ...patch } : p);
+    publish();
+
+    const { error } = await window.sb.from('team_profiles').update(fields).eq('id', id);
+    if (error) {
+      console.warn('team_profiles.update', error.message || error);
+      load();
+    }
   }
 
   window.TeamStore = {
     all: allMembers,
     assignable: assignableMembers,
+    profiles: liveProfiles,
     current: currentMember,
     reload: load,
     ensureCurrentProfile,
+    updateProfile,
   };
   window.useTeam = () => useMembers('assignable');
   window.useAllTeam = () => useMembers('all');
+  window.useAdminProfiles = () => useMembers('admin');
 
   if (window.sb) {
     window.sb.auth.getSession().then(({ data }) => {
