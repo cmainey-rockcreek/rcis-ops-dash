@@ -72,14 +72,6 @@ window.RCIS_DATA = (() => {
     { id: 'r5', kind: 'Contract', what: 'Charleston County SD · Year 3',due: '2026-06-30', days: 43, owner: 'ep' },
   ];
 
-  // Pinned notes between the 3 of you.
-  const NOTES = [
-    { id: 'n1', author: 'sr', text: "Heads up — Loudoun called, they want to add 2 SLP days. Marcus, can Anika stretch?", time: '9:14a', day: 'today' },
-    { id: 'n2', author: 'mw', text: "Possibly. She's at 22/30 but I think 26 is the real ceiling. Will confirm by EOD.", time: '9:31a', day: 'today' },
-    { id: 'n3', author: 'ep', text: "Wake County contract draft is in the shared drive — please review the indemnity clause before I send back.", time: 'Yesterday', day: 'yesterday' },
-    { id: 'n4', author: 'sr', text: "Reminder: team sync moved to Thursday this week.", time: 'Mon',      day: 'mon' },
-  ];
-
   // Kanban todos with multi-owner + optional links.
   // Schema:
   //   { id, title, column, owners[], label, priority, due, linkedTo: { type, id, name } | null, createdAt, updatedAt }
@@ -211,5 +203,5 @@ window.RCIS_DATA = (() => {
     'Recruiting',
   ];
 
-  return { TEAM, SPECIALTIES, CONTRACTORS, SCHOOLS_SAMPLE, COVERAGE_GAPS, RENEWALS, NOTES, TODOS, TODOS_SEED, STATS, STATES, DISTRICTS, SCHOOLS, LABELS };
+  return { TEAM, SPECIALTIES, CONTRACTORS, SCHOOLS_SAMPLE, COVERAGE_GAPS, RENEWALS, TODOS, TODOS_SEED, STATS, STATES, DISTRICTS, SCHOOLS, LABELS };
 })();

@@ -7,7 +7,94 @@
 (function () {
   const { teamMember, SpecChip, StatusPill, OwnerAvatar, PrioDot, CapacityBar, WeekGrid, MiniSpark, Icon } = window;
 
+  // ─── Collapse state (persisted per-widget) ────────────────────────────────
+  // localStorage maps a widget key → boolean (true = collapsed). Each
+  // collapsible widget reads + writes via useCollapsed; all widgets share
+  // the same blob so a single read/write keeps state in sync.
+  const COLLAPSE_KEY = 'rcis.dashboard.collapsed.v1';
 
+  function readCollapseMap() {
+    try {
+      const raw = localStorage.getItem(COLLAPSE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (e) { return {}; }
+  }
+
+  function useCollapsed(key) {
+    const [collapsed, setCollapsed] = React.useState(() => !!readCollapseMap()[key]);
+    const toggle = React.useCallback(() => {
+      setCollapsed((prev) => {
+        const next = !prev;
+        try {
+          const map = readCollapseMap();
+          map[key] = next;
+          localStorage.setItem(COLLAPSE_KEY, JSON.stringify(map));
+        } catch (e) {}
+        return next;
+      });
+    }, [key]);
+    return [collapsed, toggle];
+  }
+
+  // Reusable header chevron — chevron-right when collapsed, chevron-down when
+  // expanded. Click anywhere on the host header to toggle (parents wire it).
+  function CollapseChevron({ collapsed, pal }) {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 18, height: 18, marginLeft: 'auto',
+        color: pal.textFaint,
+        transition: 'transform .12s ease',
+        transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+      }}>
+        <Icon name="chev" size={14} stroke={2} />
+      </span>
+    );
+  }
+
+  // Section wrapper for non-Card widgets (Stats strip, Kanban). Renders a
+  // small card-like header with title + chevron, and hides the body when
+  // collapsed. Keeps the body unstyled so wide layouts (Kanban, stat
+  // strip) lay themselves out exactly as before when expanded.
+  function CollapsibleSection({ pal, title, collapseKey, defaultCollapsed, children }) {
+    // Honor a one-time default if no saved state exists for this key.
+    const initial = React.useMemo(() => {
+      const map = readCollapseMap();
+      return Object.prototype.hasOwnProperty.call(map, collapseKey)
+        ? !!map[collapseKey]
+        : !!defaultCollapsed;
+    }, [collapseKey, defaultCollapsed]);
+    const [collapsed, setCollapsed] = React.useState(initial);
+    const toggle = () => {
+      setCollapsed((prev) => {
+        const next = !prev;
+        try {
+          const map = readCollapseMap();
+          map[collapseKey] = next;
+          localStorage.setItem(COLLAPSE_KEY, JSON.stringify(map));
+        } catch (e) {}
+        return next;
+      });
+    };
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: collapsed ? 0 : 10 }}>
+        <button onClick={toggle} style={{
+          width: '100%',
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '6px 4px',
+          background: 'transparent', border: 'none',
+          cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+          color: pal.text,
+        }}>
+          <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: pal.text, letterSpacing: 0 }}>{title}</h3>
+          <CollapseChevron collapsed={collapsed} pal={pal} />
+        </button>
+        {!collapsed && children}
+      </div>
+    );
+  }
 
   // ─── Stat tile ────────────────────────────────────────────────────────────
   function StatTile({ pal, label, value, delta, deltaSub, trend, deltaTone }) {
@@ -50,31 +137,54 @@
   }
 
   // ─── Card shell ───────────────────────────────────────────────────────────
-  function Card({ pal, title, count, action, children, style }) {
+  function Card({ pal, title, count, action, children, style, collapseKey }) {
+    const [collapsed, toggleCollapsed] = useCollapsed(collapseKey || '');
+    const isCollapsible = !!collapseKey;
     return (
       <div style={{
         background: pal.card,
         border: `1px solid ${pal.border}`,
         borderRadius: 10,
         padding: 16,
-        display: 'flex', flexDirection: 'column', gap: 12,
+        display: 'flex', flexDirection: 'column', gap: isCollapsible && collapsed ? 0 : 12,
         overflow: 'hidden',
         ...style,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: pal.text, letterSpacing: -0.1 }}>{title}</h3>
-          {count != null && (
-            <span style={{
-              fontSize: 11, fontWeight: 600, color: pal.textSoft,
-              background: pal.chipBg, padding: '1px 7px', borderRadius: 10,
-              fontVariantNumeric: 'tabular-nums',
-            }}>{count}</span>
+          {isCollapsible ? (
+            <button onClick={toggleCollapsed} style={{
+              flex: 1, display: 'flex', alignItems: 'center', gap: 8,
+              padding: 0, background: 'transparent', border: 'none',
+              cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+              color: pal.text, minWidth: 0,
+            }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: pal.text, letterSpacing: -0.1 }}>{title}</h3>
+              {count != null && (
+                <span style={{
+                  fontSize: 11, fontWeight: 600, color: pal.textSoft,
+                  background: pal.chipBg, padding: '1px 7px', borderRadius: 10,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>{count}</span>
+              )}
+              <CollapseChevron collapsed={collapsed} pal={pal} />
+            </button>
+          ) : (
+            <>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: pal.text, letterSpacing: -0.1 }}>{title}</h3>
+              {count != null && (
+                <span style={{
+                  fontSize: 11, fontWeight: 600, color: pal.textSoft,
+                  background: pal.chipBg, padding: '1px 7px', borderRadius: 10,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>{count}</span>
+              )}
+            </>
           )}
-          {action && (
-            <span style={{ marginLeft: 'auto', fontSize: 12, color: pal.textSoft, cursor: 'pointer' }}>{action}</span>
+          {action && !(isCollapsible && collapsed) && (
+            <span style={{ marginLeft: isCollapsible ? 0 : 'auto', fontSize: 12, color: pal.textSoft, cursor: 'pointer' }}>{action}</span>
           )}
         </div>
-        {children}
+        {!(isCollapsible && collapsed) && children}
       </div>
     );
   }
@@ -110,7 +220,7 @@
 
     return (
       <>
-        <Card pal={pal} title="Coverage gaps" count={openGaps.length}
+        <Card pal={pal} title="Coverage gaps" count={openGaps.length} collapseKey="gaps"
               action={(
                 <button onClick={openNew} style={{
                   background: 'transparent', border: 'none',
@@ -184,7 +294,7 @@
       .filter(c => c.status === 'avail' || c.status === 'partial')
       .slice(0, 6);
     return (
-      <Card pal={pal} title="Has capacity now" count={list.length} action="Filter →">
+      <Card pal={pal} title="Has capacity now" count={list.length} action="Filter →" collapseKey="capacity">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {list.map((c, i) => {
             const free = c.cap - c.assigned;
@@ -573,7 +683,7 @@
 
     return (
       <>
-        <Card pal={pal} title="Upcoming renewals" count={open.length}
+        <Card pal={pal} title="Upcoming renewals" count={open.length} collapseKey="renewals"
               action={(
                 <button onClick={openNew} style={{
                   background: 'transparent', border: 'none',
@@ -657,32 +767,6 @@
     if (k === 'contractor_background') return 'Background';
     if (k === 'client_contract')       return 'Contract';
     return k;
-  }
-
-  // ─── Pinned notes ─────────────────────────────────────────────────────────
-  function PinnedNotes({ pal }) {
-    const notes = window.RCIS_DATA.NOTES;
-    return (
-      <Card pal={pal} title="Pinned notes" action="+ Add note">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {notes.map((n, i) => {
-            const author = teamMember(n.author);
-            return (
-              <div key={n.id} style={{ display: 'flex', gap: 10 }}>
-                <OwnerAvatar id={n.author} size={24} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 2 }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: pal.text }}>{author.name.split(' ')[0]}</span>
-                    <span style={{ fontSize: 10.5, color: pal.textFaint }}>{n.time}</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: pal.textSoft, lineHeight: 1.45 }}>{n.text}</div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-    );
   }
 
   // Greeting that follows the local time of day. Boundaries kept loose so
@@ -804,32 +888,36 @@
             </div>
 
             {show('stats') && (
-              <div style={{ display: 'flex', gap: 10 }}>
-                <StatTile pal={pal} label="Annual revenue"
-                  value={fmtCompact.format(totalAnnualRev || 0)}
-                  deltaSub="active assignments · 36-wk year" />
-                <StatTile pal={pal} label="Active contractors"
-                  value={String(activeContractorsCount)}
-                  deltaSub={`of ${contractors.length} total`} />
-                <StatTile pal={pal} label="Open coverage"
-                  value={String(openGapsCount)}
-                  delta={urgentGapsCount > 0 ? String(urgentGapsCount) : null}
-                  deltaTone={urgentGapsCount > 0 ? 'neg' : 'neutral'}
-                  deltaSub={urgentGapsCount > 0 ? `${urgentGapsCount} urgent` : 'none urgent'} />
-                <StatTile pal={pal} label="Renewals at risk"
-                  value={String(renewalsAtRiskCount)}
-                  deltaTone={renewalsAtRiskCount > 0 ? 'neg' : 'neutral'}
-                  deltaSub="overdue + ≤30d" />
-                <StatTile pal={pal} label="Booked this week"
-                  value={`${Math.round(weeklyBookedHours)}h`}
-                  deltaSub="across active assignments" />
-              </div>
+              <CollapsibleSection pal={pal} title="Quick stats" collapseKey="stats">
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <StatTile pal={pal} label="Annual revenue"
+                    value={fmtCompact.format(totalAnnualRev || 0)}
+                    deltaSub="active assignments · 36-wk year" />
+                  <StatTile pal={pal} label="Active contractors"
+                    value={String(activeContractorsCount)}
+                    deltaSub={`of ${contractors.length} total`} />
+                  <StatTile pal={pal} label="Open coverage"
+                    value={String(openGapsCount)}
+                    delta={urgentGapsCount > 0 ? String(urgentGapsCount) : null}
+                    deltaTone={urgentGapsCount > 0 ? 'neg' : 'neutral'}
+                    deltaSub={urgentGapsCount > 0 ? `${urgentGapsCount} urgent` : 'none urgent'} />
+                  <StatTile pal={pal} label="Renewals at risk"
+                    value={String(renewalsAtRiskCount)}
+                    deltaTone={renewalsAtRiskCount > 0 ? 'neg' : 'neutral'}
+                    deltaSub="overdue + ≤30d" />
+                  <StatTile pal={pal} label="Booked this week"
+                    value={`${Math.round(weeklyBookedHours)}h`}
+                    deltaSub="across active assignments" />
+                </div>
+              </CollapsibleSection>
             )}
 
             {show('kanban') && (
-              <div style={{ display: 'flex' }}>
-                <Kanban pal={pal} />
-              </div>
+              <CollapsibleSection pal={pal} title="Team board" collapseKey="kanban">
+                <div style={{ display: 'flex' }}>
+                  <Kanban pal={pal} />
+                </div>
+              </CollapsibleSection>
             )}
 
             {(show('gaps') || show('capacity')) && (
@@ -839,10 +927,9 @@
               </div>
             )}
 
-            {(show('renewals') || show('notes')) && (
-              <div style={{ display: 'grid', gridTemplateColumns: show('renewals') && show('notes') ? '1fr 1fr' : '1fr', gap: 12 }}>
-                {show('renewals') && <Renewals pal={pal} />}
-                {show('notes') && <PinnedNotes pal={pal} />}
+            {show('renewals') && (
+              <div>
+                <Renewals pal={pal} />
               </div>
             )}
           </div>

@@ -84,8 +84,7 @@
       "showGaps": true,
       "showCapacity": true,
       "showKanban": true,
-      "showRenewals": true,
-      "showNotes": true
+      "showRenewals": true
     }/*EDITMODE-END*/;
 
     const THEME_KEY = 'rcis.theme';
@@ -120,7 +119,6 @@
         capacity: t.showCapacity,
         kanban: t.showKanban,
         renewals: t.showRenewals,
-        notes: t.showNotes,
       };
 
       let page;
@@ -172,7 +170,6 @@
                 <TweakToggle label="Capacity now"      value={t.showCapacity} onChange={(v) => setTweak('showCapacity', v)} />
                 <TweakToggle label="Team board"        value={t.showKanban}   onChange={(v) => setTweak('showKanban', v)} />
                 <TweakToggle label="Renewals"          value={t.showRenewals} onChange={(v) => setTweak('showRenewals', v)} />
-                <TweakToggle label="Pinned notes"      value={t.showNotes}    onChange={(v) => setTweak('showNotes', v)} />
               </TweakSection>
             )}
           </TweaksPanel>
