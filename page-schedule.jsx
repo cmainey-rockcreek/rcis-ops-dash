@@ -891,7 +891,7 @@
             <>
               <div style={{ fontSize: 13, fontWeight: 700, color: marginColor, lineHeight: 1.2 }}>
                 {marginHr >= 0 ? '+' : ''}{fmtMoney(marginHr)}/hr
-                {netHr != null && (
+                {netHr != null && burdenHr > 0 && (
                   <span style={{
                     fontSize: 10.5, fontWeight: 600, marginLeft: 4,
                     color: netHr < 0 ? pal.warn : pal.textSoft,

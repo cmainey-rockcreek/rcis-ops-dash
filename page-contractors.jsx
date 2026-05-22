@@ -405,7 +405,7 @@
       ? window.useContractorAssignments(c)
       : (c.assignments || []);
     const F = window.ContractorFinancials || {};
-    const defaults = { bill: c.rates && c.rates.bill, pay: c.rates && c.rates.hourly };
+    const defaults = { bill: c.rates && c.rates.bill, pay: c.rates && c.rates.hourly, spec: c.spec };
     // Annualized at the 36-week school year — matches the Matchmaker page so
     // both views agree on what the same hours/rates earn over a contract.
     // Subscribe so Net Margin re-renders when admin edits a burden value.
@@ -465,9 +465,9 @@
             <Kpi pal={pal} label="Revenue"     value={fmt(annualRev)} sub="/year"
                  valueColor={pal.accent} />
             <Kpi pal={pal} label="Gross Margin" value={fmt(marginHr, { cents: true })} sub="/hour"
-                 valueColor={marginHr > 0 ? pal.text : pal.warn} />
+                 valueColor={marginHr >= 0 ? pal.text : pal.warn} />
             <Kpi pal={pal} label="Net Margin"   value={fmt(netMarginHr, { cents: true })} sub="/hour"
-                 valueColor={netMarginHr > 0 ? pal.text : pal.warn} />
+                 valueColor={netMarginHr >= 0 ? pal.text : pal.warn} />
           </div>
         </div>
       </div>
@@ -1359,6 +1359,9 @@
 
   // ─── Assignment editor modal ──────────────────────────────────────────────
   function AssignmentEditor({ assignment, isNew, pal, onSave, onDelete, onClose }) {
+    // Subscribe so the "auto · N% of direct" label and autoIndirect math
+    // pick up admin edits to the per-spec ratio while this modal is open.
+    if (window.useSpecSettings) window.useSpecSettings();
     const [draft, setDraft] = React.useState({
       id: null,
       contractorId: null, contractorName: '',

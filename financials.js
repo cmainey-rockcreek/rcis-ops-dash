@@ -106,8 +106,12 @@ window.ContractorFinancials = (() => {
     const active = activeRows(rows);
     const totalHours = active.reduce((s, a) => s + weeklyHours(a), 0);
     if (totalHours <= 0) {
-      // No active rows → fall back to default bill − default pay − 0 burden.
-      return num(defaults && defaults.bill) - num(defaults && defaults.pay);
+      // No active rows → fall back to default bill − default pay − burden
+      // looked up against the contractor-level spec on `defaults`. Callers
+      // that don't carry a spec (older mock paths) get 0 burden, which
+      // keeps the legacy "no spec = no burden" behavior intact.
+      const fallbackBurden = defaults && defaults.spec ? num(lookup(defaults.spec)) : 0;
+      return num(defaults && defaults.bill) - num(defaults && defaults.pay) - fallbackBurden;
     }
     const totalBill   = active.reduce((s, a) => s + weeklyHours(a) * effectiveBill(a, defaults && defaults.bill), 0);
     const totalPay    = active.reduce((s, a) => s + weeklyHours(a) * effectivePay(a,  defaults && defaults.pay),  0);

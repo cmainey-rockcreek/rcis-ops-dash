@@ -119,13 +119,22 @@ window.SpecSettingsStore = (() => {
 
     async upsert(specCode, patch) {
       if (!specCode) return;
-      const existing = state[specCode] || { specCode };
+      const before = state[specCode]; // may be undefined if no prior row
+      const existing = before || { specCode };
       const next = { ...existing, ...patch, specCode };
       setState({ ...state, [specCode]: next });
       const row = toRow(next);
       const { error } = await window.sb.from(TABLE)
         .upsert(row, { onConflict: 'spec_code' });
-      if (error) console.warn('spec_settings.upsert', error);
+      if (error) {
+        console.warn('spec_settings.upsert', error);
+        // Roll back the optimistic change so the (cached) local state
+        // doesn't lie about a value that never made it to the DB.
+        const rolled = { ...state };
+        if (before) rolled[specCode] = before;
+        else delete rolled[specCode];
+        setState(rolled);
+      }
     },
 
     reload: load,

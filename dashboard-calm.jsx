@@ -707,6 +707,9 @@
     const renewals    = window.useRenewals     ? window.useRenewals()     : [];
     const assignments = window.useAssignments  ? window.useAssignments()  : [];
     const overrides   = window.useContractorOverrides ? window.useContractorOverrides() : {};
+    // Subscribe so admin's per-spec indirect ratio edits flow through to
+    // the revenue tile (autoIndirect uses the current ratio).
+    if (window.useSpecSettings) window.useSpecSettings();
 
     const today = new Date().toLocaleDateString('en-US', {
       weekday: 'long', month: 'long', day: 'numeric',

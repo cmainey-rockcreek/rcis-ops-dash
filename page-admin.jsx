@@ -129,10 +129,10 @@
         }}>{p.email}</span>
 
         <EditableCell pal={pal} value={p.role} placeholder="Add role"
-          onSave={(v) => save({ role: v })} />
+          onSave={(v) => save({ role: v })} requireNonEmpty />
 
         <EditableCell pal={pal} value={p.initials} placeholder="—"
-          monospace maxLen={3}
+          monospace maxLen={3} requireNonEmpty
           onSave={(v) => save({ initials: (v || '').toUpperCase() })} />
 
         <ColorPicker pal={pal} value={p.color} onSave={(v) => save({ color: v })} />
@@ -377,13 +377,18 @@
     const display = displayTransform ? displayTransform(value) : String(value);
     const [editing, setEditing] = React.useState(false);
     const [draft, setDraft] = React.useState(display);
+    const startValueRef = React.useRef(null);
     const inputRef = React.useRef(null);
 
     React.useEffect(() => {
       if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
     }, [editing]);
 
-    const start = () => { setDraft(display); setEditing(true); };
+    const start = () => {
+      startValueRef.current = value;
+      setDraft(display);
+      setEditing(true);
+    };
     const commit = () => {
       const raw = draft.trim();
       if (raw === '') { setEditing(false); return; }
@@ -393,7 +398,17 @@
       // false positives whenever displayTransform is lossy (e.g. Math.round
       // for ratios), causing a plain click-then-blur to overwrite a stored
       // 0.305 with 0.31 even though the user typed nothing.
-      if (raw !== display) onSave(parsed);
+      if (raw !== display) {
+        // Conflict probe: if value changed under us mid-edit (a teammate's
+        // realtime update arrived between click and blur), log a warning
+        // so the surprise overwrite is at least debuggable. Trusted-team
+        // policy stays last-write-wins.
+        if (startValueRef.current != null && Number(value) !== Number(startValueRef.current)) {
+          console.warn('NumberCell: value changed mid-edit; saving anyway',
+            { startValue: startValueRef.current, currentValue: value, newValue: parsed });
+        }
+        onSave(parsed);
+      }
       setEditing(false);
     };
     const cancel = () => { setDraft(display); setEditing(false); };

@@ -27,7 +27,10 @@
         const hrs = cov.hoursPerWeek || 0;
         const bill = c.rates.bill || 0;
         const pay  = c.rates.hourly || 0;
-        const burden = window.burdenFor ? window.burdenFor(c.spec) : 0;
+        // Key burden off the coverage row's spec (the role being delivered),
+        // not the contractor's primary spec — matches the assignment-level
+        // logic in financials.js and the Matchmaker shortlist.
+        const burden = window.burdenFor ? window.burdenFor(cov.spec || c.spec) : 0;
         weeklyHours += hrs;
         annualRevenue   += bill * hrs * WEEKS;
         annualMargin    += (bill - pay) * hrs * WEEKS;
@@ -79,6 +82,9 @@
     const enriched = window.useDistrictsView
       ? window.useDistrictsView(window.RCIS_DATA.DISTRICTS)
       : window.RCIS_DATA.DISTRICTS;
+    // Subscribe so the rollup recomputes when admin tweaks per-spec burden
+    // (rollup reads window.burdenFor inside its loop).
+    const specSettings = window.useSpecSettings ? window.useSpecSettings() : null;
 
     const rows = React.useMemo(() => {
       const q = query.trim().toLowerCase();
@@ -100,7 +106,7 @@
         if (av > bv) return  dirMul;
         return 0;
       });
-    }, [enriched, query, sort]);
+    }, [enriched, query, sort, specSettings]);
 
     const totals = React.useMemo(() => {
       let students = 0, revenue = 0, contractors = new Set();

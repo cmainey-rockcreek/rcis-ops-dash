@@ -56,8 +56,12 @@
   }
 
   function assignableMembers() {
-    const live = profiles.filter((p) => p.active);
-    return live.length ? live : FALLBACK_TEAM;
+    // Only fall back to the prototype team when nothing has ever loaded
+    // from Supabase. If profiles loaded but every row is inactive (an
+    // admin has deactivated everyone), return an empty list rather than
+    // surfacing mock IDs that would fail the team_profiles FK on insert.
+    if (!profiles.length) return FALLBACK_TEAM;
+    return profiles.filter((p) => p.active);
   }
 
   // All persisted profiles regardless of `active` — admin page edits this.
