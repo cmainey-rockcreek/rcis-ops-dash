@@ -748,9 +748,10 @@
             const indirect = a.indirectOverride
               ? (Number(a.indirectHours) || 0)
               : (window.AssignmentsStore && window.AssignmentsStore.autoIndirect
-                  ? window.AssignmentsStore.autoIndirect(direct) : 0);
+                  ? window.AssignmentsStore.autoIndirect(direct, a.spec) : 0);
             return {
               direct, indirect, status: a.status || 'active',
+              spec: a.spec || '',
               payRate: a.payRate, billRate: a.billRate,
             };
           });

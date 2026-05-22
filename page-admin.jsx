@@ -33,6 +33,7 @@
         </div>
 
         <TeamMembersSection pal={pal} />
+        <SpecialtySettingsSection pal={pal} />
       </div>
     );
   }
@@ -278,6 +279,161 @@
           transition: 'left .12s ease',
         }} />
       </button>
+    );
+  }
+
+  // ─── Specialty settings ──────────────────────────────────────────────────
+  // Per-spec indirect ratio + burden $/hr. Edits save on blur and flow
+  // immediately through Net Margin everywhere (contractor profile, district
+  // profile + Revenue card, Matchmaker shortlist).
+  function SpecialtySettingsSection({ pal }) {
+    const settings = window.useSpecSettings ? window.useSpecSettings() : {};
+    const SPECS = (window.RCIS_DATA && window.RCIS_DATA.SPECIALTIES) || [];
+    const DEFAULT_RATIO  = (window.SpecSettingsStore && window.SpecSettingsStore.DEFAULT_INDIRECT_RATIO) || 0.25;
+    const DEFAULT_BURDEN = (window.SpecSettingsStore && window.SpecSettingsStore.DEFAULT_BURDEN) || 0;
+
+    return (
+      <div style={{
+        background: pal.card, border: `1px solid ${pal.border}`,
+        borderRadius: 10, overflow: 'hidden',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '12px 16px',
+          borderBottom: `1px solid ${pal.border}`,
+        }}>
+          <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: pal.text }}>
+            Specialty settings
+          </h3>
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: pal.textSoft,
+            background: pal.chipBg, padding: '1px 7px', borderRadius: 10,
+            fontVariantNumeric: 'tabular-nums',
+          }}>{SPECS.length} specs</span>
+          <span style={{ marginLeft: 'auto', fontSize: 11.5, color: pal.textFaint }}>
+            Edits flow live to Net Margin across the app.
+          </span>
+        </div>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '60px 1.4fr 110px 130px',
+          gap: 12, alignItems: 'center',
+          padding: '10px 16px',
+          background: pal.cardAlt,
+          borderBottom: `1px solid ${pal.border}`,
+          fontSize: 10, fontWeight: 700, letterSpacing: 0.6,
+          color: pal.textFaint, textTransform: 'uppercase',
+        }}>
+          <span>Code</span>
+          <span>Specialty</span>
+          <span style={{ textAlign: 'right' }}>Indirect %</span>
+          <span style={{ textAlign: 'right' }} title="Burden per billable hour: the fully-loaded cost beyond pay rate — taxes, insurance, admin overhead.">
+            Burden $/hr
+          </span>
+        </div>
+
+        {SPECS.map((sp) => {
+          const s = settings[sp.code] || {};
+          const ratio  = s.indirectRatio          != null ? s.indirectRatio          : DEFAULT_RATIO;
+          const burden = s.burdenPerBillableHour  != null ? s.burdenPerBillableHour  : DEFAULT_BURDEN;
+          return (
+            <div key={sp.code} style={{
+              display: 'grid',
+              gridTemplateColumns: '60px 1.4fr 110px 130px',
+              gap: 12, alignItems: 'center',
+              padding: '10px 16px',
+              borderBottom: `1px solid ${pal.borderSoft}`,
+            }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                padding: '3px 8px', borderRadius: 5,
+                background: (sp.color || pal.accent) + '20',
+                color: sp.color || pal.accent,
+                fontSize: 11, fontWeight: 700, letterSpacing: 0.4,
+                width: 'fit-content',
+              }}>{sp.code}</span>
+              <span style={{ fontSize: 12.5, color: pal.text }}>{sp.name}</span>
+              <NumberCell pal={pal} value={ratio} step="0.01" min="0" max="2"
+                suffix="%" displayTransform={(v) => `${Math.round(Number(v) * 100)}`}
+                parse={(v) => Number(v) / 100}
+                title="Indirect hours auto-derive as direct × this ratio."
+                onSave={(next) => window.SpecSettingsStore.upsert(sp.code, { indirectRatio: next })} />
+              <NumberCell pal={pal} value={burden} step="0.01" min="0"
+                prefix="$"
+                title="Burden per billable hour: the fully-loaded cost beyond pay rate — taxes, insurance, admin overhead."
+                onSave={(next) => window.SpecSettingsStore.upsert(sp.code, { burdenPerBillableHour: next })} />
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Inline-edit numeric cell. Click value to edit; Enter / blur saves; Esc
+  // cancels. `displayTransform` + `parse` let the cell show "25" while the
+  // underlying value is 0.25, for the ratio column.
+  function NumberCell({ pal, value, onSave, step, min, max, prefix, suffix, displayTransform, parse, title }) {
+    const display = displayTransform ? displayTransform(value) : String(value);
+    const [editing, setEditing] = React.useState(false);
+    const [draft, setDraft] = React.useState(display);
+    const inputRef = React.useRef(null);
+
+    React.useEffect(() => {
+      if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
+    }, [editing]);
+
+    const start = () => { setDraft(display); setEditing(true); };
+    const commit = () => {
+      const raw = draft.trim();
+      if (raw === '') { setEditing(false); return; }
+      const parsed = parse ? parse(raw) : Number(raw);
+      if (!Number.isFinite(parsed)) { setEditing(false); return; }
+      if (parsed !== Number(value)) onSave(parsed);
+      setEditing(false);
+    };
+    const cancel = () => { setDraft(display); setEditing(false); };
+    const onKey = (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    };
+
+    if (editing) {
+      return (
+        <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 3 }}>
+          {prefix && <span style={{ fontSize: 12, color: pal.textFaint }}>{prefix}</span>}
+          <input ref={inputRef} type="number" step={step || 'any'} min={min} max={max}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit} onKeyDown={onKey}
+            style={{
+              padding: '4px 8px', fontSize: 12.5,
+              color: pal.text, background: pal.cardAlt,
+              border: `1px solid ${pal.accent}`, borderRadius: 6,
+              outline: 'none', fontFamily: 'ui-monospace, monospace',
+              textAlign: 'right', width: 80,
+            }}
+          />
+          {suffix && <span style={{ fontSize: 12, color: pal.textFaint }}>{suffix}</span>}
+        </span>
+      );
+    }
+    return (
+      <span onClick={start} title={title || 'Click to edit'}
+        style={{
+          display: 'inline-flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 3,
+          marginLeft: 'auto', padding: '3px 8px',
+          fontSize: 12.5, color: pal.text, fontWeight: 500,
+          fontFamily: 'ui-monospace, monospace',
+          cursor: 'pointer',
+          border: '1px dashed transparent', borderRadius: 5,
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.borderColor = pal.borderSoft}
+        onMouseLeave={(e) => e.currentTarget.style.borderColor = 'transparent'}>
+        {prefix && <span style={{ color: pal.textFaint }}>{prefix}</span>}
+        <span>{display}</span>
+        {suffix && <span style={{ color: pal.textFaint }}>{suffix}</span>}
+      </span>
     );
   }
 

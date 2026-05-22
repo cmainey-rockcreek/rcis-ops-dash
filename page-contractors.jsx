@@ -400,7 +400,6 @@
 
   function ContractorHeader({ c, pal }) {
     const initials = c.name.split(' ').map((p) => p[0]).join('').slice(0, 2);
-    const free = c.cap - c.assigned;
     // Pull merged assignments so revenue/margin update live with edits.
     const assignments = window.useContractorAssignments
       ? window.useContractorAssignments(c)
@@ -409,9 +408,12 @@
     const defaults = { bill: c.rates && c.rates.bill, pay: c.rates && c.rates.hourly };
     // Annualized at the 36-week school year — matches the Matchmaker page so
     // both views agree on what the same hours/rates earn over a contract.
-    const annualRev = F.annualRevenue ? F.annualRevenue(assignments, defaults) : 0;
-    const marginHr  = F.marginPerHour ? F.marginPerHour(assignments, defaults)  : 0;
-    const fmt       = F.formatUSD || ((n) => `$${(n || 0).toLocaleString()}`);
+    // Subscribe so Net Margin re-renders when admin edits a burden value.
+    if (window.useSpecSettings) window.useSpecSettings();
+    const annualRev   = F.annualRevenue ? F.annualRevenue(assignments, defaults) : 0;
+    const marginHr    = F.marginPerHour ? F.marginPerHour(assignments, defaults)  : 0;
+    const netMarginHr = F.netMarginPerHour ? F.netMarginPerHour(assignments, defaults) : marginHr;
+    const fmt         = F.formatUSD || ((n) => `$${(n || 0).toLocaleString()}`);
     return (
       <div style={{ padding: '14px 24px 4px', display: 'flex', alignItems: 'flex-start', gap: 18 }}>
         <span style={{
@@ -460,12 +462,12 @@
               value={c.rates.bill}
               onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { billRate: v })} />
             <Kpi pal={pal} label="Load"     value={`${c.assigned}h`}     sub={`of ${c.cap}h`} />
-            <Kpi pal={pal} label="Free"     value={`${Math.max(0, free)}h`} sub="this week"
-                 valueColor={free > 0 ? pal.accent : pal.textFaint} />
-            <Kpi pal={pal} label="Revenue"  value={fmt(annualRev)} sub="/year"
+            <Kpi pal={pal} label="Revenue"     value={fmt(annualRev)} sub="/year"
                  valueColor={pal.accent} />
-            <Kpi pal={pal} label="Margin"   value={fmt(marginHr, { cents: true })} sub="/hour"
+            <Kpi pal={pal} label="Gross Margin" value={fmt(marginHr, { cents: true })} sub="/hour"
                  valueColor={marginHr > 0 ? pal.text : pal.warn} />
+            <Kpi pal={pal} label="Net Margin"   value={fmt(netMarginHr, { cents: true })} sub="/hour"
+                 valueColor={netMarginHr > 0 ? pal.text : pal.warn} />
           </div>
         </div>
       </div>
@@ -1459,7 +1461,7 @@
       // value the moment it saves.
       const indirect = draft.indirectOverride
         ? (Number(draft.indirectHours) || 0)
-        : window.AssignmentsStore.autoIndirect(direct);
+        : window.AssignmentsStore.autoIndirect(direct, draft.spec);
       onSave({
         ...draft,
         directHours:   direct,
@@ -1543,7 +1545,16 @@
             <div>
               <div style={s.label}>Specialty / role</div>
               <select style={s.input} value={draft.spec || ''}
-                onChange={(e) => set({ spec: e.target.value })}>
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setDraft((d) => ({
+                    ...d,
+                    spec: v,
+                    indirectHours: d.indirectOverride
+                      ? d.indirectHours
+                      : window.AssignmentsStore.autoIndirect(d.directHours, v),
+                  }));
+                }}>
                 <option value="">—</option>
                 {SPECIALTIES.map((sp) => (
                   <option key={sp.code} value={sp.code}>{sp.code} — {sp.name}</option>
@@ -1564,7 +1575,7 @@
                       directHours: v,
                       indirectHours: d.indirectOverride
                         ? d.indirectHours
-                        : (window.AssignmentsStore.autoIndirect(v)),
+                        : (window.AssignmentsStore.autoIndirect(v, d.spec)),
                     }));
                   }} />
               </div>
@@ -1578,7 +1589,7 @@
                       setDraft((d) => ({
                         ...d,
                         indirectOverride: false,
-                        indirectHours: window.AssignmentsStore.autoIndirect(d.directHours),
+                        indirectHours: window.AssignmentsStore.autoIndirect(d.directHours, d.spec),
                       }));
                     }} style={{
                       background: 'transparent', border: 'none',
@@ -1590,7 +1601,7 @@
                     <span style={{
                       fontSize: 10, fontWeight: 500, color: pal.textFaint,
                       textTransform: 'none', letterSpacing: 0,
-                    }}>auto · 25% of direct</span>
+                    }}>auto · {Math.round((window.indirectRatioFor ? window.indirectRatioFor(draft.spec) : 0.25) * 100)}% of direct</span>
                   )}
                 </div>
                 <input type="number" min="0" step="0.25"

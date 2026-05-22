@@ -6,7 +6,8 @@
 
   // ─── Compute district-level rollups ───────────────────────────────────────
   // Returns { schools, students, contractorIds:Set, contractors:[{...}],
-  // weeklyHours, annualRevenue, annualMargin, gaps:[] }.
+  // weeklyHours, annualRevenue, annualMargin, annualNetMargin, gaps:[] }.
+  // Gross Margin = bill − pay; Net Margin = bill − pay − per-spec burden.
   // Annualized at the 36-week school year (ContractorFinancials.WEEKS_PER_SCHOOL_YEAR)
   // so this rollup agrees with the contractor profile + Matchmaker views.
   function rollup(districtId) {
@@ -14,7 +15,7 @@
     const contractorIds = new Set();
     const byContractor = {};
     let students = 0, weeklyHours = 0;
-    let annualRevenue = 0, annualMargin = 0;
+    let annualRevenue = 0, annualMargin = 0, annualNetMargin = 0;
     const WEEKS = (window.ContractorFinancials && window.ContractorFinancials.WEEKS_PER_SCHOOL_YEAR) || 36;
 
     for (const s of schools) {
@@ -23,11 +24,14 @@
         contractorIds.add(cov.contractorId);
         const c = (window.getContractorEnriched || window.getContractor)(cov.contractorId);
         if (!c) continue;
-        weeklyHours += cov.hoursPerWeek || 0;
-        // Roll the contractor's bill/pay into annual revenue/margin per
-        // school × 36-week school year.
-        annualRevenue += (c.rates.bill || 0) * (cov.hoursPerWeek || 0) * WEEKS;
-        annualMargin  += ((c.rates.bill || 0) - (c.rates.hourly || 0)) * (cov.hoursPerWeek || 0) * WEEKS;
+        const hrs = cov.hoursPerWeek || 0;
+        const bill = c.rates.bill || 0;
+        const pay  = c.rates.hourly || 0;
+        const burden = window.burdenFor ? window.burdenFor(c.spec) : 0;
+        weeklyHours += hrs;
+        annualRevenue   += bill * hrs * WEEKS;
+        annualMargin    += (bill - pay) * hrs * WEEKS;
+        annualNetMargin += (bill - pay - burden) * hrs * WEEKS;
 
         if (!byContractor[cov.contractorId]) {
           byContractor[cov.contractorId] = {
@@ -36,7 +40,7 @@
           };
         }
         byContractor[cov.contractorId].schoolCount += 1;
-        byContractor[cov.contractorId].hoursPerWeek += cov.hoursPerWeek || 0;
+        byContractor[cov.contractorId].hoursPerWeek += hrs;
       }
     }
 
@@ -50,8 +54,9 @@
       students,
       contractors: Object.values(byContractor).sort((a, b) => b.hoursPerWeek - a.hoursPerWeek),
       weeklyHours,
-      annualRevenue: Math.round(annualRevenue),
-      annualMargin: Math.round(annualMargin),
+      annualRevenue:   Math.round(annualRevenue),
+      annualMargin:    Math.round(annualMargin),
+      annualNetMargin: Math.round(annualNetMargin),
       gaps,
     };
   }
@@ -327,6 +332,8 @@
   }
 
   function DistrictDetail({ pal, id }) {
+    // Subscribe so Net Margin re-renders when admin edits burden per spec.
+    if (window.useSpecSettings) window.useSpecSettings();
     const base = window.RCIS_DATA.DISTRICTS.find((x) => x.id === id);
     const d = window.useDistrictView ? window.useDistrictView(base) : base;
     if (!d) {
@@ -407,8 +414,10 @@
           }}>
             <Kpi pal={pal} label="Schools"  value={r.schools.length} />
             <Kpi pal={pal} label="Hours"    value={`${r.weeklyHours}h`} sub="per week" />
-            <Kpi pal={pal} label="Revenue"  value={`$${r.annualRevenue.toLocaleString()}`} sub="/year" valueColor={pal.accent} />
-            <Kpi pal={pal} label="Margin"   value={`$${r.annualMargin.toLocaleString()}`} sub="/year" />
+            <Kpi pal={pal} label="Revenue"      value={`$${r.annualRevenue.toLocaleString()}`}   sub="/year" valueColor={pal.accent} />
+            <Kpi pal={pal} label="Gross Margin" value={`$${r.annualMargin.toLocaleString()}`}    sub="/year" />
+            <Kpi pal={pal} label="Net Margin"   value={`$${r.annualNetMargin.toLocaleString()}`} sub="/year"
+                 valueColor={r.annualNetMargin >= 0 ? pal.text : pal.warn} />
           </div>
         </div>
       </div>
@@ -709,7 +718,9 @@
   }
 
   function RevenueCard({ r, pal }) {
-    const marginPct = r.annualRevenue > 0 ? Math.round((r.annualMargin / r.annualRevenue) * 100) : 0;
+    const grossPct = r.annualRevenue > 0 ? Math.round((r.annualMargin    / r.annualRevenue) * 100) : 0;
+    const netPct   = r.annualRevenue > 0 ? Math.round((r.annualNetMargin / r.annualRevenue) * 100) : 0;
+    const netColor = r.annualNetMargin >= 0 ? pal.text : pal.warn;
     return (
       <Section pal={pal} title="Revenue">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -721,9 +732,31 @@
                 letterSpacing: -0.5, fontVariantNumeric: 'tabular-nums' }}>
                 ${r.annualRevenue.toLocaleString()}
               </span>
-              <span style={{ fontSize: 11.5, color: pal.textFaint }}>
-                margin ${r.annualMargin.toLocaleString()} ({marginPct}%)
-              </span>
+              <span style={{ fontSize: 11.5, color: pal.textFaint }}>revenue</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 18 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6,
+                color: pal.textFaint, textTransform: 'uppercase' }}>Gross Margin</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 3 }}>
+                <span style={{ fontSize: 16, fontWeight: 600, color: pal.text,
+                  letterSpacing: -0.3, fontVariantNumeric: 'tabular-nums' }}>
+                  ${r.annualMargin.toLocaleString()}
+                </span>
+                <span style={{ fontSize: 11, color: pal.textFaint, fontVariantNumeric: 'tabular-nums' }}>{grossPct}%</span>
+              </div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6,
+                color: pal.textFaint, textTransform: 'uppercase' }}>Net Margin</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 3 }}>
+                <span style={{ fontSize: 16, fontWeight: 600, color: netColor,
+                  letterSpacing: -0.3, fontVariantNumeric: 'tabular-nums' }}>
+                  ${r.annualNetMargin.toLocaleString()}
+                </span>
+                <span style={{ fontSize: 11, color: pal.textFaint, fontVariantNumeric: 'tabular-nums' }}>{netPct}%</span>
+              </div>
             </div>
           </div>
           <div style={{
@@ -731,7 +764,7 @@
             borderTop: `1px solid ${pal.borderSoft}`, lineHeight: 1.5,
           }}>
             Each active contractor's <b>bill rate × hours / week × 36-week school year</b>.
-            Matches the contractor profile and Matchmaker views.
+            Net subtracts the per-specialty burden from /admin.
           </div>
         </div>
       </Section>

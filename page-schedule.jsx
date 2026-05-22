@@ -248,6 +248,8 @@
   }
 
   function ScheduleWorkspace({ pal }) {
+    // Subscribe so ranked rows + shortlist re-render when burden changes.
+    if (window.useSpecSettings) window.useSpecSettings();
     const allGaps = window.useCoverageGaps ? window.useCoverageGaps() : [];
     const gaps = React.useMemo(() => allGaps.filter((g) => g.status === 'open'), [allGaps]);
     // Wrap contractors through the overrides view so renames/contact edits
@@ -830,6 +832,8 @@
     const marginColor = marginHr == null
       ? pal.textSoft
       : marginHr > 0 ? pal.accent : pal.warn;
+    const burdenHr = window.burdenFor ? window.burdenFor(contractor.spec) : 0;
+    const netHr    = hasMargin ? (marginHr - burdenHr) : null;
     return (
       <button
         onClick={onClick}
@@ -887,6 +891,14 @@
             <>
               <div style={{ fontSize: 13, fontWeight: 700, color: marginColor, lineHeight: 1.2 }}>
                 {marginHr >= 0 ? '+' : ''}{fmtMoney(marginHr)}/hr
+                {netHr != null && (
+                  <span style={{
+                    fontSize: 10.5, fontWeight: 600, marginLeft: 4,
+                    color: netHr < 0 ? pal.warn : pal.textSoft,
+                  }}>
+                    (net {netHr >= 0 ? '' : '−'}{fmtMoney(Math.abs(netHr))})
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 1 }}>
                 cost {hourly != null ? fmtMoney(hourly) + '/hr' : '—'}
@@ -1113,14 +1125,19 @@
   }
 
   function ShortlistCard({ pal, proposal, gap, contractor, rateOverrides, onConfirm, onDismiss, onUpdateNote, onCreateTask }) {
+    // Re-render when admin tweaks per-spec burden.
+    if (window.useSpecSettings) window.useSpecSettings();
     const stale = !gap || !contractor || (gap && gap.status !== 'open');
     const billRate = gap ? effectiveRate(gap, rateOverrides) : null;
     const payRate  = contractor && contractor.rates && Number.isFinite(Number(contractor.rates.hourly))
       ? Number(contractor.rates.hourly) : null;
-    const marginHr = (billRate != null && payRate != null) ? (billRate - payRate) : null;
-    const hours    = gap ? (Number(gap.hours) || 0) : 0;
-    const weeklyRev = (billRate != null) ? billRate * hours : null;
-    const weeklyMargin = (marginHr != null) ? marginHr * hours : null;
+    const grossHr = (billRate != null && payRate != null) ? (billRate - payRate) : null;
+    const burdenHr = contractor && window.burdenFor ? window.burdenFor(contractor.spec) : 0;
+    const netHr   = (grossHr != null) ? (grossHr - burdenHr) : null;
+    const hours   = gap ? (Number(gap.hours) || 0) : 0;
+    const weeklyRev   = (billRate != null) ? billRate * hours : null;
+    const weeklyGross = (grossHr  != null) ? grossHr  * hours : null;
+    const weeklyNet   = (netHr    != null) ? netHr    * hours : null;
     const schoolOrDist = gap
       ? (gap.scope === 'school' ? gap.schoolName : (gap.districtName ? gap.districtName + ' (district-wide)' : ''))
       : '';
@@ -1189,20 +1206,29 @@
               </div>
             </div>
 
-            {/* Numbers */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-              <Stat pal={pal} label="Bill / hr" value={billRate != null ? fmtMoney(billRate) : '—'} />
-              <Stat pal={pal} label="Pay / hr"  value={payRate  != null ? fmtMoney(payRate)  : '—'} />
-              <Stat pal={pal} label="Margin / hr"
-                value={marginHr != null ? fmtMoney(marginHr) : '—'}
-                tone={marginHr != null && marginHr < 0 ? '#E76B5D' : pal.text} />
+            {/* Per-hour: bill | pay | burden | gross | net */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 4 }}>
+              <Stat pal={pal} label="Bill"   value={billRate != null ? fmtMoney(billRate) : '—'} />
+              <Stat pal={pal} label="Pay"    value={payRate  != null ? fmtMoney(payRate)  : '—'} />
+              <Stat pal={pal} label="Burden" value={burdenHr > 0 ? fmtMoney(burdenHr) : '—'}
+                tone={pal.textSoft} />
+              <Stat pal={pal} label="Gross/hr"
+                value={grossHr != null ? fmtMoney(grossHr) : '—'}
+                tone={grossHr != null && grossHr < 0 ? '#E76B5D' : pal.text} />
+              <Stat pal={pal} label="Net/hr"
+                value={netHr != null ? fmtMoney(netHr) : '—'}
+                tone={netHr != null && netHr < 0 ? '#E76B5D' : pal.text} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            {/* Weekly: rev | gross | net */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
               <Stat pal={pal} label="Weekly rev"
                 value={weeklyRev != null ? fmtMoney(weeklyRev) : '—'} tone={pal.accent} />
-              <Stat pal={pal} label="Weekly margin"
-                value={weeklyMargin != null ? fmtMoney(weeklyMargin) : '—'}
-                tone={weeklyMargin != null && weeklyMargin < 0 ? '#E76B5D' : pal.text} />
+              <Stat pal={pal} label="Weekly gross"
+                value={weeklyGross != null ? fmtMoney(weeklyGross) : '—'}
+                tone={weeklyGross != null && weeklyGross < 0 ? '#E76B5D' : pal.text} />
+              <Stat pal={pal} label="Weekly net"
+                value={weeklyNet != null ? fmtMoney(weeklyNet) : '—'}
+                tone={weeklyNet != null && weeklyNet < 0 ? '#E76B5D' : pal.text} />
             </div>
 
             {/* Note */}

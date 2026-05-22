@@ -15,10 +15,17 @@ window.AssignmentsStore = (() => {
     return Math.round((Number(n) || 0) * 4) / 4;
   }
 
-  // Auto-calc rule shared with the UI: 25% of direct hours, rounded to 0.25.
+  // Auto-calc rule shared with the UI: a per-specialty ratio (default 0.25)
+  // applied to direct hours, rounded to 0.25. Pass the assignment's spec code
+  // to pick up an admin-set override; one-arg callers still get the legacy
+  // 25% fallback.
   const INDIRECT_RATIO = 0.25;
-  function autoIndirect(directHours) {
-    return roundQuarter((Number(directHours) || 0) * INDIRECT_RATIO);
+  function ratioForSpec(specCode) {
+    if (window.indirectRatioFor) return window.indirectRatioFor(specCode);
+    return INDIRECT_RATIO;
+  }
+  function autoIndirect(directHours, specCode) {
+    return roundQuarter((Number(directHours) || 0) * ratioForSpec(specCode));
   }
 
   function fromRow(r) {
@@ -156,9 +163,9 @@ window.AssignmentsStore = (() => {
         source: 'supabase',
         ...partial,
       };
-      // If indirect wasn't overridden, derive it from direct × 0.25.
+      // If indirect wasn't overridden, derive it from direct × per-spec ratio.
       if (!a.indirectOverride) {
-        a.indirectHours = roundQuarter((Number(a.directHours) || 0) * 0.25);
+        a.indirectHours = autoIndirect(a.directHours, a.spec);
       }
       // If user picks an end date in the past, mark completed on save.
       if (a.endDate) {
@@ -182,7 +189,7 @@ window.AssignmentsStore = (() => {
       const next = { ...existing, ...patch, updatedAt: Date.now() };
       // Re-derive indirect from direct unless user has overridden.
       if (!next.indirectOverride) {
-        next.indirectHours = roundQuarter((Number(next.directHours) || 0) * 0.25);
+        next.indirectHours = autoIndirect(next.directHours, next.spec);
       }
       if (next.endDate) {
         const today = new Date().toISOString().slice(0, 10);
@@ -206,6 +213,7 @@ window.AssignmentsStore = (() => {
     // Shared with the editor + financials so the rule lives in one place.
     INDIRECT_RATIO,
     autoIndirect,
+    ratioForSpec,
   };
 })();
 
@@ -224,14 +232,16 @@ window.useAssignments = function useAssignments() {
 window.useContractorAssignments = function useContractorAssignments(c) {
   const persisted = window.useAssignments();
   return React.useMemo(() => {
-    const mock = (c && c.assignments) ? c.assignments.map((m) => ({ ...m, source: 'mock' })) : [];
+    // Mock seed rows don't carry a spec — borrow the contractor's so Net
+    // Margin can subtract burden the same way it does for real assignments.
+    const mock = (c && c.assignments) ? c.assignments.map((m) => ({ ...m, spec: m.spec || (c && c.spec) || '', source: 'mock' })) : [];
     const real = persisted.filter((a) => a.contractorId === (c && c.id)).map((a) => {
       const direct = Number(a.directHours) || 0;
       // If the user hasn't overridden, the store already keeps indirect in
       // sync at 25% of direct — fall through here for old rows just in case.
       const indirect = a.indirectOverride
         ? (Number(a.indirectHours) || 0)
-        : window.AssignmentsStore.autoIndirect(direct);
+        : window.AssignmentsStore.autoIndirect(direct, a.spec);
       return {
         _id: a.id,
         schoolId: a.schoolId || null,

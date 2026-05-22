@@ -288,6 +288,35 @@ create table if not exists public.entity_notes (
   primary key (scope, scope_id)
 );
 
+-- ─── spec_settings ───────────────────────────────────────────────────────
+-- Per-specialty knobs: indirect-hours ratio (auto-derive on assignments),
+-- burden $/hr (taxes + insurance + admin overhead, subtracted from Net
+-- Margin), and rate-band seed defaults. Editable on /admin. One row per
+-- spec code from RCIS_DATA.SPECIALTIES.
+create table if not exists public.spec_settings (
+  spec_code                  text primary key,
+  indirect_ratio             numeric not null default 0.25,
+  burden_per_billable_hour   numeric not null default 0,
+  default_pay_low            numeric,
+  default_pay_high           numeric,
+  default_bill_low           numeric,
+  default_bill_high          numeric,
+  updated_at                 timestamptz not null default now()
+);
+
+insert into public.spec_settings
+  (spec_code, indirect_ratio, burden_per_billable_hour,
+   default_pay_low, default_pay_high, default_bill_low, default_bill_high)
+values
+  ('SLP',  0.25, 0, 58, 78,  88, 115),
+  ('OT',   0.25, 0, 60, 80,  90, 120),
+  ('PT',   0.25, 0, 62, 82,  92, 125),
+  ('PSY',  0.25, 0, 68, 92, 100, 145),
+  ('BCBA', 0.25, 0, 65, 88,  95, 135),
+  ('MH',   0.25, 0, 55, 75,  85, 110),
+  ('SPED', 0.25, 0, 50, 70,  78, 105)
+on conflict (spec_code) do nothing;
+
 -- ─── Auto-update updated_at on row updates ────────────────────────────────
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql as $$
@@ -343,6 +372,10 @@ create trigger touch_contacts before update on public.contacts
 
 drop trigger if exists touch_entity_notes on public.entity_notes;
 create trigger touch_entity_notes before update on public.entity_notes
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_spec_settings on public.spec_settings;
+create trigger touch_spec_settings before update on public.spec_settings
   for each row execute function public.touch_updated_at();
 
 -- ─── Auth user → team profile automation ─────────────────────────────────
@@ -435,6 +468,7 @@ alter table public.team_profiles enable row level security;
 alter table public.contacts      enable row level security;
 alter table public.documents     enable row level security;
 alter table public.entity_notes  enable row level security;
+alter table public.spec_settings enable row level security;
 
 drop policy if exists "team full access" on public.todos;
 create policy "team full access" on public.todos
@@ -530,6 +564,10 @@ drop policy if exists "team full access" on public.entity_notes;
 create policy "team full access" on public.entity_notes
   for all to authenticated using (true) with check (true);
 
+drop policy if exists "team full access" on public.spec_settings;
+create policy "team full access" on public.spec_settings
+  for all to authenticated using (true) with check (true);
+
 -- ─── Realtime ─────────────────────────────────────────────────────────────
 -- Lets the app receive live updates when teammates change anything.
 do $$ begin
@@ -590,5 +628,9 @@ exception when duplicate_object then null;
 end $$;
 do $$ begin
   alter publication supabase_realtime add table public.entity_notes;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.spec_settings;
 exception when duplicate_object then null;
 end $$;
