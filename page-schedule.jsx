@@ -254,9 +254,12 @@
     const gaps = React.useMemo(() => allGaps.filter((g) => g.status === 'open'), [allGaps]);
     // Wrap contractors through the overrides view so renames/contact edits
     // show up in the Matchmaker rows the moment they save.
+    // Subscribe to ContractorsStore so user-created contractors show up in
+    // the Matchmaker without a refresh.
+    const liveCatalog = window.useContractors ? window.useContractors() : window.RCIS_DATA.CONTRACTORS;
     const contractors = window.useContractorsView
-      ? window.useContractorsView(window.RCIS_DATA.CONTRACTORS)
-      : window.RCIS_DATA.CONTRACTORS;
+      ? window.useContractorsView(liveCatalog)
+      : liveCatalog;
 
     const [selectedGapId, setSelectedGapId] = React.useState(null);
     const [selectedContractorId, setSelectedContractorId] = React.useState(null);

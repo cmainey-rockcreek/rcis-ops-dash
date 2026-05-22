@@ -288,6 +288,36 @@ create table if not exists public.entity_notes (
   primary key (scope, scope_id)
 );
 
+-- ─── contractors (user-created) ──────────────────────────────────────────
+-- User-created contractors that live alongside the in-file mock catalog
+-- (data-contractors.js). The store merges these into window.RCIS_DATA.CONTRACTORS
+-- on read so existing UI keeps working unchanged. Editable fields still flow
+-- through `contractor_overrides` (rates, schedule, contact) — this table
+-- only stores the creation defaults + identity.
+create table if not exists public.contractors (
+  id            text primary key,
+  name          text not null,
+  spec          text not null,
+  cap           numeric not null default 30,
+  status        text not null default 'avail'
+                  check (status in ('avail','full','pto','partial')),
+  states        text[] not null default '{}',
+  modalities    text[] not null default array['tele','onsite']::text[],
+  email         text,
+  phone         text,
+  city          text,
+  npi           text,
+  hire_date     date,
+  pay_rate      numeric,
+  bill_rate     numeric,
+  notes         text default '',
+  created_by    uuid references public.team_profiles(id) on delete set null,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+create index if not exists contractors_spec_idx   on public.contractors (spec);
+create index if not exists contractors_status_idx on public.contractors (status);
+
 -- ─── spec_settings ───────────────────────────────────────────────────────
 -- Per-specialty knobs: indirect-hours ratio (auto-derive on assignments),
 -- burden $/hr (taxes + insurance + admin overhead, subtracted from Net
@@ -376,6 +406,10 @@ create trigger touch_entity_notes before update on public.entity_notes
 
 drop trigger if exists touch_spec_settings on public.spec_settings;
 create trigger touch_spec_settings before update on public.spec_settings
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_contractors on public.contractors;
+create trigger touch_contractors before update on public.contractors
   for each row execute function public.touch_updated_at();
 
 -- ─── Auth user → team profile automation ─────────────────────────────────
@@ -469,6 +503,7 @@ alter table public.contacts      enable row level security;
 alter table public.documents     enable row level security;
 alter table public.entity_notes  enable row level security;
 alter table public.spec_settings enable row level security;
+alter table public.contractors enable row level security;
 
 drop policy if exists "team full access" on public.todos;
 create policy "team full access" on public.todos
@@ -570,6 +605,10 @@ drop policy if exists "team full access" on public.spec_settings;
 create policy "team full access" on public.spec_settings
   for all to authenticated using (true) with check (true);
 
+drop policy if exists "team full access" on public.contractors;
+create policy "team full access" on public.contractors
+  for all to authenticated using (true) with check (true);
+
 -- ─── Realtime ─────────────────────────────────────────────────────────────
 -- Lets the app receive live updates when teammates change anything.
 do $$ begin
@@ -634,5 +673,9 @@ exception when duplicate_object then null;
 end $$;
 do $$ begin
   alter publication supabase_realtime add table public.spec_settings;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.contractors;
 exception when duplicate_object then null;
 end $$;

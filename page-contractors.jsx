@@ -26,7 +26,11 @@
     const [specFilter, setSpecFilter] = React.useState('all');
     const [openTodosOnly, setOpenTodosOnly] = React.useState(false);
     const [sort, setSort] = React.useState({ key: 'name', dir: 'asc' });
+    const [creating, setCreating] = React.useState(false);
     const todos = window.useTodos();
+
+    // Subscribe so newly-created user contractors appear without a refresh.
+    const liveCatalog = window.useContractors ? window.useContractors() : window.RCIS_DATA.CONTRACTORS;
 
     // Set of contractor ids with at least one OPEN (non-done) linked todo.
     const idsWithOpenTodos = React.useMemo(() => {
@@ -42,8 +46,8 @@
     // Apply contractor_overrides so renames / contact edits show up in
     // the list. Falls back to mock when no override exists.
     const enriched = window.useContractorsView
-      ? window.useContractorsView(window.RCIS_DATA.CONTRACTORS)
-      : window.RCIS_DATA.CONTRACTORS;
+      ? window.useContractorsView(liveCatalog)
+      : liveCatalog;
 
     const sortedFiltered = React.useMemo(() => {
       const q = query.trim().toLowerCase();
@@ -105,7 +109,7 @@
             <button style={btnSecondary(pal)}>
               <Icon name="filter" size={13} stroke={1.8} /> Export CSV
             </button>
-            <button style={btnPrimary(pal)}>
+            <button onClick={() => setCreating(true)} style={btnPrimary(pal)}>
               <Icon name="plus" size={13} stroke={2.4} /> New contractor
             </button>
           </div>
@@ -198,6 +202,218 @@
                 <ContractorRow key={c.id} c={c} pal={pal} />
               ))
             )}
+          </div>
+        </div>
+
+        {creating && (
+          <NewContractorEditor pal={pal}
+            onClose={() => setCreating(false)}
+            onSave={async (draft) => {
+              const created = await window.ContractorsStore.add(draft);
+              setCreating(false);
+              if (created && created.id) window.navigate(`/contractors/${created.id}`);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ─── New contractor modal ─────────────────────────────────────────────────
+  // Captures the identity + rate defaults a new contractor needs to show up
+  // in the list, Matchmaker, and Net Margin math. Editable fields (rate
+  // tweaks, schedule, contact) continue to flow through contractor_overrides
+  // once the record exists, so this modal is intentionally minimal.
+  function NewContractorEditor({ pal, onSave, onClose }) {
+    const SPECIALTIES = (window.RCIS_DATA && window.RCIS_DATA.SPECIALTIES) || [];
+    const STATE_OPTS = ['VA','MD','DC','NC','SC','PA','TN','GA','FL','OH','NY','TX','CA'];
+    const [draft, setDraft] = React.useState({
+      name: '',
+      spec: '',
+      cap: 30,
+      states: [],
+      city: '',
+      email: '',
+      phone: '',
+      payRate: '',
+      billRate: '',
+    });
+    const [saving, setSaving] = React.useState(false);
+
+    React.useEffect(() => {
+      const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+      document.addEventListener('keydown', onKey);
+      return () => document.removeEventListener('keydown', onKey);
+    }, [onClose]);
+
+    const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+    const toggleState = (st) => set({
+      states: draft.states.includes(st)
+        ? draft.states.filter((x) => x !== st)
+        : [...draft.states, st],
+    });
+
+    const canSave = draft.name.trim().length > 0 && draft.spec.length > 0 && !saving;
+    const submit = async () => {
+      if (!canSave) return;
+      setSaving(true);
+      try {
+        await onSave({
+          name: draft.name.trim(),
+          spec: draft.spec,
+          cap: Number(draft.cap) || 30,
+          states: draft.states,
+          city: draft.city.trim() || '',
+          email: draft.email.trim() || '',
+          phone: draft.phone.trim() || '',
+          rates: {
+            hourly: draft.payRate  !== '' ? Number(draft.payRate)  : 0,
+            bill:   draft.billRate !== '' ? Number(draft.billRate) : 0,
+          },
+        });
+      } finally { setSaving(false); }
+    };
+
+    const labelStyle = {
+      fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: pal.textFaint,
+      textTransform: 'uppercase', marginBottom: 4,
+    };
+    const inputStyle = {
+      width: '100%', padding: '7px 10px',
+      fontSize: 13, color: pal.text, background: pal.cardAlt,
+      border: `1px solid ${pal.border}`, borderRadius: 6,
+      outline: 'none', fontFamily: 'inherit',
+    };
+
+    return (
+      <div onClick={onClose} style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        background: 'rgba(16,18,22,.55)',
+        backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 40,
+      }}>
+        <div onClick={(e) => e.stopPropagation()} style={{
+          background: pal.card, color: pal.text,
+          borderRadius: 12, width: '100%', maxWidth: 520,
+          boxShadow: '0 30px 80px rgba(0,0,0,.35), 0 0 0 1px ' + pal.border,
+          display: 'flex', flexDirection: 'column',
+          fontFamily: '"Public Sans", system-ui, sans-serif',
+        }}>
+          <div style={{
+            padding: '14px 18px',
+            borderBottom: `1px solid ${pal.border}`,
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <div style={{ flex: 1, fontSize: 14, fontWeight: 700, color: pal.text }}>
+              New contractor
+            </div>
+            <button onClick={onClose} style={{
+              border: 'none', background: 'transparent', color: pal.textFaint,
+              cursor: 'pointer', fontSize: 22, lineHeight: 1, padding: '0 4px',
+            }}>×</button>
+          </div>
+
+          <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <div style={labelStyle}>Name *</div>
+              <input autoFocus value={draft.name} style={inputStyle}
+                placeholder="First Last"
+                onChange={(e) => set({ name: e.target.value })} />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 80px', gap: 12 }}>
+              <div>
+                <div style={labelStyle}>Specialty *</div>
+                <select value={draft.spec} style={inputStyle}
+                  onChange={(e) => set({ spec: e.target.value })}>
+                  <option value="">— Pick a specialty —</option>
+                  {SPECIALTIES.map((sp) => (
+                    <option key={sp.code} value={sp.code}>{sp.code} — {sp.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <div style={labelStyle}>Cap (hrs/wk)</div>
+                <input type="number" min="0" step="1" value={draft.cap} style={inputStyle}
+                  onChange={(e) => set({ cap: e.target.value })} />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <div style={labelStyle}>Pay rate ($/hr)</div>
+                <input type="number" min="0" step="1" value={draft.payRate} style={inputStyle}
+                  placeholder="e.g. 70"
+                  onChange={(e) => set({ payRate: e.target.value })} />
+              </div>
+              <div>
+                <div style={labelStyle}>Bill rate ($/hr)</div>
+                <input type="number" min="0" step="1" value={draft.billRate} style={inputStyle}
+                  placeholder="e.g. 100"
+                  onChange={(e) => set({ billRate: e.target.value })} />
+              </div>
+            </div>
+
+            <div>
+              <div style={labelStyle}>Licensed states</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {STATE_OPTS.map((st) => {
+                  const on = draft.states.includes(st);
+                  return (
+                    <button key={st} onClick={() => toggleState(st)} style={{
+                      padding: '4px 10px', borderRadius: 999,
+                      border: `1px solid ${on ? pal.accent : pal.border}`,
+                      background: on ? pal.accentSoft : 'transparent',
+                      color: on ? pal.accent : pal.textSoft,
+                      fontSize: 12, fontWeight: on ? 600 : 500,
+                      fontFamily: 'ui-monospace, monospace',
+                      cursor: 'pointer',
+                    }}>{st}</button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <div style={labelStyle}>City</div>
+                <input value={draft.city} style={inputStyle}
+                  placeholder="Optional"
+                  onChange={(e) => set({ city: e.target.value })} />
+              </div>
+              <div>
+                <div style={labelStyle}>Email</div>
+                <input value={draft.email} style={inputStyle}
+                  placeholder="Optional"
+                  onChange={(e) => set({ email: e.target.value })} />
+              </div>
+            </div>
+
+            <div>
+              <div style={labelStyle}>Phone</div>
+              <input value={draft.phone} style={inputStyle}
+                placeholder="Optional"
+                onChange={(e) => set({ phone: e.target.value })} />
+            </div>
+          </div>
+
+          <div style={{
+            padding: '12px 18px',
+            borderTop: `1px solid ${pal.border}`,
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ fontSize: 11.5, color: pal.textFaint }}>
+              {canSave ? '' : 'Name + specialty required'}
+            </span>
+            <span style={{ marginLeft: 'auto' }} />
+            <button onClick={onClose} style={btnSecondary(pal)}>Cancel</button>
+            <button onClick={submit} disabled={!canSave} style={{
+              ...btnPrimary(pal),
+              background: canSave ? pal.accent : pal.chipBg,
+              color: canSave ? '#fff' : pal.textFaint,
+              cursor: canSave ? 'pointer' : 'default',
+            }}>{saving ? 'Saving…' : 'Create contractor'}</button>
           </div>
         </div>
       </div>
@@ -335,6 +551,10 @@
   }
 
   function ContractorDetail({ pal, id }) {
+    // Subscribe so newly-created contractors render the moment their store
+    // load completes (otherwise navigating straight to /contractors/:id
+    // right after creation would briefly hit the NotFound branch).
+    if (window.useContractors) window.useContractors();
     const base = window.getContractor(id);
     // Layer Supabase overrides (pay/bill rate, edited schedule) on top of the
     // mock defaults. Persisted assignments are merged in via the AssignmentsCard.
