@@ -285,20 +285,96 @@
   }
 
   // ─── Capacity now ─────────────────────────────────────────────────────────
+  // Booked hours are derived live from the same data the contractor profile
+  // shows: mock seed rows + persisted Supabase assignments, with indirect
+  // hours rolled in per the admin-configured spec ratio. The free/total
+  // numbers therefore match the contractor's actual schedule, not the
+  // mock-baked `c.assigned` snapshot.
   function CapacityNow({ pal }) {
     // Subscribe to overrides so renamed contractors show their new name here.
     const enriched = window.useContractorsView
       ? window.useContractorsView(window.RCIS_DATA.CONTRACTORS)
       : window.RCIS_DATA.CONTRACTORS;
-    const list = enriched
-      .filter(c => c.status === 'avail' || c.status === 'partial')
+    const persisted = window.useAssignments ? window.useAssignments() : [];
+    // Pick up admin's per-spec ratio changes (autoIndirect reads this).
+    if (window.useSpecSettings) window.useSpecSettings();
+
+    const SPECIALTIES = (window.RCIS_DATA && window.RCIS_DATA.SPECIALTIES) || [];
+    const [specFilter, setSpecFilter] = React.useState('all');
+
+    // Compute booked hours per contractor: sum mock + real active rows,
+    // applying the per-spec indirect ratio so the math agrees with the
+    // contractor profile's useContractorAssignments.
+    const rows = React.useMemo(() => {
+      return enriched.map((c) => {
+        let booked = 0;
+        for (const m of (c.assignments || [])) {
+          if ((m.status || 'active') !== 'active') continue;
+          const direct = Number(m.direct) || 0;
+          const indirect = Number(m.indirect) || 0;
+          const fallback = Number(m.hoursPerWeek) || 0;
+          booked += direct || indirect ? direct + indirect : fallback;
+        }
+        for (const a of persisted) {
+          if (a.contractorId !== c.id) continue;
+          if ((a.status || 'active') !== 'active') continue;
+          const direct = Number(a.directHours) || 0;
+          const indirect = a.indirectOverride
+            ? (Number(a.indirectHours) || 0)
+            : (window.AssignmentsStore && window.AssignmentsStore.autoIndirect
+                ? window.AssignmentsStore.autoIndirect(direct, a.spec || c.spec)
+                : 0);
+          booked += direct + indirect;
+        }
+        const cap = Number(c.cap) || 0;
+        const free = Math.max(0, cap - booked);
+        return { c, booked, cap, free };
+      });
+    }, [enriched, persisted]);
+
+    const filtered = specFilter === 'all'
+      ? rows
+      : rows.filter(({ c }) => c.spec === specFilter);
+    const list = filtered
+      .filter(({ cap, free }) => cap > 0 && free > 0)
+      .sort((a, b) => b.free - a.free)
       .slice(0, 6);
+
+    const filterChips = [
+      { key: 'all', label: 'All' },
+      ...SPECIALTIES.map((sp) => ({ key: sp.code, label: sp.code })),
+    ];
+
     return (
-      <Card pal={pal} title="Has capacity now" count={list.length} action="Filter →" collapseKey="capacity">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {list.map((c, i) => {
-            const free = c.cap - c.assigned;
+      <Card pal={pal} title="Has capacity now" count={list.length} collapseKey="capacity">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {filterChips.map((opt) => {
+            const on = specFilter === opt.key;
             return (
+              <button key={opt.key} onClick={() => setSpecFilter(opt.key)} style={{
+                padding: '3px 9px', borderRadius: 999,
+                border: `1px solid ${on ? pal.accent : pal.border}`,
+                background: on ? pal.accentSoft : 'transparent',
+                color: on ? pal.accent : pal.textSoft,
+                fontSize: 11, fontWeight: on ? 600 : 500,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}>{opt.label}</button>
+            );
+          })}
+        </div>
+
+        {list.length === 0 ? (
+          <div style={{
+            padding: '14px 4px',
+            fontSize: 12, color: pal.textFaint, fontStyle: 'italic',
+          }}>
+            {specFilter === 'all'
+              ? 'No contractors with free hours right now.'
+              : `No ${specFilter} contractors with capacity right now.`}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {list.map(({ c, booked, cap, free }, i) => (
               <div key={c.id} style={{
                 display: 'grid', gridTemplateColumns: '28px 1fr 90px 64px',
                 gap: 10, alignItems: 'center',
@@ -313,21 +389,30 @@
                   fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
                 }}>{c.name.split(' ').map(p => p[0]).join('')}</span>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, color: pal.text, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                  <window.Link to={`/contractors/${c.id}`} style={{
+                    fontSize: 12.5, color: pal.text, fontWeight: 500,
+                    textDecoration: 'none',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    display: 'block',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = pal.accent}
+                  onMouseLeave={(e) => e.currentTarget.style.color = pal.text}>
+                    {c.name}
+                  </window.Link>
                   <div style={{ fontSize: 11, color: pal.textFaint, display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
                     <SpecChip code={c.spec} />
-                    <span>{c.states.join(', ')}</span>
+                    <span>{(c.states || []).join(', ')}</span>
                   </div>
                 </div>
                 <div>
-                  <CapacityBar assigned={c.assigned} cap={c.cap} track={pal.chipBg} fill={pal.accent} />
-                  <div style={{ fontSize: 10, color: pal.textFaint, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>{c.assigned}/{c.cap}h</div>
+                  <CapacityBar assigned={booked} cap={cap} track={pal.chipBg} fill={pal.accent} />
+                  <div style={{ fontSize: 10, color: pal.textFaint, marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>{booked}/{cap}h</div>
                 </div>
                 <div style={{ fontSize: 12, color: pal.accent, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>+{free}h free</div>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
       </Card>
     );
   }
