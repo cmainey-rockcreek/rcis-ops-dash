@@ -542,9 +542,11 @@ drop policy if exists "users can create own team profile" on public.team_profile
 create policy "users can create own team profile" on public.team_profiles
   for insert to authenticated with check (auth.uid() = id);
 
+-- Drop the narrower per-user update policy: Postgres ORs RLS policies on
+-- the same action, so this restriction was dead the moment we added the
+-- broader 'team can update team profiles' policy below. Removing it makes
+-- the intent explicit and avoids a false sense of restriction.
 drop policy if exists "users can update own team profile" on public.team_profiles;
-create policy "users can update own team profile" on public.team_profiles
-  for update to authenticated using (auth.uid() = id) with check (auth.uid() = id);
 
 -- Admin page edits other teammates' rows (rename, role, initials, color,
 -- active toggle). Trusted internal team — every signed-in user is an admin.

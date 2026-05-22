@@ -108,7 +108,7 @@
     const metadataName = user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name);
     const { data: existing, error: readError } = await window.sb
       .from('team_profiles')
-      .select('id,full_name,initials,color,role')
+      .select('id,full_name,initials,color,role,active')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -128,8 +128,11 @@
       role: (existing && existing.role) || 'Team',
       initials: (existing && existing.initials) || initialsFor(fullName, user.email),
       color: (existing && existing.color) || colorFor(user.id),
-      active: true,
     };
+    // Only set active on first insert — preserve any admin deactivation on
+    // subsequent sign-ins. (The /admin Active toggle lives in this column;
+    // forcing active:true here used to silently undo deactivations.)
+    if (!existing) payload.active = true;
 
     const { error } = await window.sb.from('team_profiles').upsert(payload, { onConflict: 'id' });
     if (error) {
