@@ -338,6 +338,7 @@
     const TodoEditor = window.TodoEditor;
     const todos = window.useTodos();
     const team = window.useTeam();
+    const [collapsed, toggleCollapsed] = useCollapsed('kanban');
     // Re-render when contractor / contact / school / district names change so
     // linked-task chips + entity references stay fresh.
     if (window.useContractorOverrides) window.useContractorOverrides();
@@ -417,37 +418,48 @@
       <>
         <div style={{
           background: pal.card, border: `1px solid ${pal.border}`, borderRadius: 10, padding: 16,
-          display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, overflow: 'hidden',
+          display: 'flex', flexDirection: 'column', gap: collapsed ? 0 : 12, minHeight: 0, overflow: 'hidden',
           width: '100%', flex: 1,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: pal.text }}>Task board</h3>
-            <span style={{ fontSize: 11, color: pal.textFaint }}>· {todos.length} cards · {todos.filter(t => t.column !== 'done').length} open</span>
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ display: 'flex', gap: 4 }}>
-                {team.map(t => {
-                  const count = todos.filter(x => x.owners.includes(t.id) && x.column !== 'done').length;
-                  return (
-                    <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '2px 8px 2px 4px',
-                      borderRadius: 999, background: pal.chipBg, fontSize: 11, color: pal.textSoft }}>
-                      <OwnerAvatar id={t.id} size={16} />
-                      <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{count}</span>
-                    </div>
-                  );
-                })}
+            <button onClick={toggleCollapsed} style={{
+              flex: 1, display: 'flex', alignItems: 'center', gap: 8,
+              padding: 0, background: 'transparent', border: 'none',
+              cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+              color: pal.text, minWidth: 0,
+            }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: pal.text }}>Task board</h3>
+              <span style={{ fontSize: 11, color: pal.textFaint }}>· {todos.length} cards · {todos.filter(t => t.column !== 'done').length} open</span>
+              <CollapseChevron collapsed={collapsed} pal={pal} />
+            </button>
+            {!collapsed && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {team.map(t => {
+                    const count = todos.filter(x => x.owners.includes(t.id) && x.column !== 'done').length;
+                    return (
+                      <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '2px 8px 2px 4px',
+                        borderRadius: 999, background: pal.chipBg, fontSize: 11, color: pal.textSoft }}>
+                        <OwnerAvatar id={t.id} size={16} />
+                        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <button onClick={() => openNew('todo')} style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '4px 10px',
+                  background: pal.accent, color: '#fff',
+                  border: 'none', borderRadius: 6,
+                  fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}>
+                  <Icon name="plus" size={12} stroke={2.4} /> New task
+                </button>
               </div>
-              <button onClick={() => openNew('todo')} style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                padding: '4px 10px',
-                background: pal.accent, color: '#fff',
-                border: 'none', borderRadius: 6,
-                fontSize: 12, fontWeight: 600,
-                cursor: 'pointer', fontFamily: 'inherit',
-              }}>
-                <Icon name="plus" size={12} stroke={2.4} /> New task
-              </button>
-            </div>
+            )}
           </div>
+          {!collapsed && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, minHeight: 0 }}>
             {cols.map(col => {
               const items = col.key === 'done' ? doneVisible : byColumn[col.key];
@@ -510,6 +522,7 @@
               );
             })}
           </div>
+          )}
         </div>
 
         {editor && (
@@ -913,11 +926,9 @@
             )}
 
             {show('kanban') && (
-              <CollapsibleSection pal={pal} title="Team board" collapseKey="kanban">
-                <div style={{ display: 'flex' }}>
-                  <Kanban pal={pal} />
-                </div>
-              </CollapsibleSection>
+              <div style={{ display: 'flex' }}>
+                <Kanban pal={pal} />
+              </div>
             )}
 
             {(show('gaps') || show('capacity')) && (
