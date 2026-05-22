@@ -949,7 +949,7 @@
               )}
 
               {(show('gaps') || show('capacity')) && (
-                <div style={{ display: 'grid', gridTemplateColumns: show('gaps') && show('capacity') ? '1fr 1fr' : '1fr', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: show('gaps') && show('capacity') ? '1fr 1fr' : '1fr', gap: 12, alignItems: 'start' }}>
                   {show('gaps') && <CoverageGaps pal={pal} />}
                   {show('capacity') && <CapacityNow pal={pal} />}
                 </div>
