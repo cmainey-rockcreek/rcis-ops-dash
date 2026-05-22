@@ -137,7 +137,7 @@
   };
 
   function TodoEditor({ todo, pal, onSave, onDelete, onClose, isNew }) {
-    const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
+    const team = window.useTeam();
     // Old todos in localStorage may pre-date notes/attachments — default them.
     const [draft, setDraft] = React.useState({
       notes: '',

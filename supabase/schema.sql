@@ -310,7 +310,6 @@ create table if not exists public.contractors (
   hire_date     date,
   pay_rate      numeric,
   bill_rate     numeric,
-  notes         text default '',
   created_by    uuid references public.team_profiles(id) on delete set null,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()

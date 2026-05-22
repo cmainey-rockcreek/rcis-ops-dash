@@ -34,7 +34,7 @@
 
   function TasksWorkspace({ pal }) {
     const todos = window.useTodos();
-    const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
+    const team = window.useTeam();
     // Re-render when contractor / contact / school / district names change so
     // linked-task chips + filters stay fresh.
     if (window.useContractorOverrides) window.useContractorOverrides();

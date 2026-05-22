@@ -45,7 +45,8 @@ window.ContractorsStore = (() => {
       schedule: [],
       assignments: [],
       documents: [],
-      notes: r.notes || '',
+      // Free-text notes flow through entity_notes (NotesStore), not this row.
+      notes: '',
       createdBy: r.created_by || null,
       createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
       updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : Date.now(),
@@ -69,7 +70,6 @@ window.ContractorsStore = (() => {
       hire_date: c.hireDate || null,
       pay_rate: c.rates && c.rates.hourly != null ? c.rates.hourly : null,
       bill_rate: c.rates && c.rates.bill   != null ? c.rates.bill   : null,
-      notes: c.notes || '',
       created_by: c.createdBy || null,
     };
   }

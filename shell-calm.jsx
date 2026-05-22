@@ -64,7 +64,7 @@
 
   // ─── Top Bar ──────────────────────────────────────────────────────────────
   function CalmTopBar({ pal, searchPlaceholder }) {
-    const team = window.useTeam ? window.useTeam() : window.RCIS_DATA.TEAM;
+    const team = window.useTeam();
     return (
       <div style={{
         height: 56, flexShrink: 0,

@@ -173,13 +173,6 @@ window.TodosStore = (() => {
       this.update(id, { column });
     },
 
-    byColumn() {
-      const out = { todo: [], doing: [], done: [] };
-      for (const t of state) if (out[t.column]) out[t.column].push(t);
-      for (const k of Object.keys(out)) out[k].sort((a, b) => b.updatedAt - a.updatedAt);
-      return out;
-    },
-
     reload: load,
   };
 })();
