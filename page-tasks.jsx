@@ -122,12 +122,11 @@
 
     return (
       <div style={{
-        flex: 1,
+        flex: 1, minHeight: 0,
         padding: '20px 24px',
         display: 'flex',
         flexDirection: 'column',
         gap: 14,
-        overflowY: 'auto',
       }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
           <div>
@@ -168,7 +167,7 @@
 
         <Filters pal={pal} team={team} filters={filters} setFilter={setFilter} clearFilters={clearFilters} todos={todos} />
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 12, minHeight: 0 }}>
+        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 300px', gap: 12, minHeight: 0 }}>
           <div style={{
             background: pal.card,
             border: `1px solid ${pal.border}`,
@@ -177,9 +176,10 @@
             display: 'flex',
             flexDirection: 'column',
             gap: 12,
-            minHeight: 560,
+            minHeight: 0,
+            overflow: 'hidden',
           }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, minHeight: 0 }}>
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, minHeight: 0 }}>
               {['todo', 'doing', 'attention', 'done'].map((column) => (
                 <TaskColumn
                   key={column}
@@ -430,7 +430,8 @@
           borderRadius: 8,
           background: isOver ? pal.accentSoft : pal.cardAlt,
           border: `1.5px ${isOver ? 'dashed' : 'solid'} ${isOver ? pal.accent : pal.borderSoft}`,
-          minHeight: 520,
+          minHeight: 0,
+          overflow: 'hidden',
           transition: 'background .12s, border-color .12s',
         }}
       >
@@ -455,7 +456,11 @@
           </button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <div style={{
+          flex: 1, minHeight: 0,
+          display: 'flex', flexDirection: 'column', gap: 7,
+          overflowY: 'auto', paddingRight: 4,
+        }}>
           {items.map((todo) => (
             <TaskCard
               key={todo.id}
@@ -589,7 +594,10 @@
     }, [todos, team]);
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: 12,
+        minHeight: 0, overflowY: 'auto', paddingRight: 4,
+      }}>
         <SideCard pal={pal} title="Owner load">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {ownerCounts.map((m) => (
