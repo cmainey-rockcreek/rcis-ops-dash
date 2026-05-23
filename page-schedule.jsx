@@ -33,17 +33,32 @@
   const TOP_N = 5;
   const ONSITE_RADIUS_MILES = 100;
 
-  // Default bill rate for an open gap when neither the gap nor the
-  // district rate card has one set. Each gap carries its own `billRate`
-  // override on the row; inline edits in the Matchmaker write directly to
-  // Supabase via GapsStore. The gap-editor prefills new gaps from the
-  // district rate card when (districtId, spec) is known.
+  // Last-resort bill rate when neither the gap, its district's rate card,
+  // nor the per-spec default has one set. Each gap can still carry its own
+  // `billRate` override on the row (e.g. a special one-off rate); inline
+  // edits in the Matchmaker write directly to Supabase via GapsStore. When
+  // there's no override, the district rate card drives the displayed rate
+  // live — so changing a district's SLP rate flows through to every SLP
+  // gap there immediately, the same way it does for assignments.
   const DEFAULT_BILL_RATE = 85;
 
   function effectiveRate(gap, overrides) {
+    if (!gap) return DEFAULT_BILL_RATE;
     const o = overrides && overrides[gap.id];
     if (Number.isFinite(o) && o > 0) return o;
     if (Number.isFinite(gap.billRate) && gap.billRate > 0) return gap.billRate;
+    const districtId = gap.districtId
+      || (gap.schoolId && window.assignmentDistrictId
+            ? window.assignmentDistrictId({ schoolId: gap.schoolId })
+            : null);
+    if (districtId && gap.spec && window.rateCardFor) {
+      const r = window.rateCardFor(districtId, gap.spec);
+      if (Number.isFinite(r) && r > 0) return r;
+    }
+    if (gap.spec && window.defaultBillFor) {
+      const d = window.defaultBillFor(gap.spec);
+      if (Number.isFinite(d) && d > 0) return d;
+    }
     return DEFAULT_BILL_RATE;
   }
   function gapWeeklyRevenue(g, overrides) {
@@ -256,8 +271,12 @@
   }
 
   function ScheduleWorkspace({ pal }) {
-    // Subscribe so ranked rows + shortlist re-render when burden changes.
+    // Subscribe so ranked rows + shortlist re-render when burden changes,
+    // and so the shortlist's bill / margin reflect a district rate-card
+    // edit live (effectiveRate now resolves through the card when a gap
+    // has no explicit override).
     if (window.useSpecSettings) window.useSpecSettings();
+    if (window.useDistrictRateCards) window.useDistrictRateCards();
     const allGaps = window.useCoverageGaps ? window.useCoverageGaps() : [];
     const gaps = React.useMemo(() => allGaps.filter((g) => g.status === 'open'), [allGaps]);
     // Wrap contractors through the overrides view so renames/contact edits

@@ -72,24 +72,22 @@
 
     const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
-    // Prefill bill rate from the district rate card when a new gap arrives
-    // with a known (district, spec). Only fills when the user hasn't typed
-    // a value yet (null / blank) — never overwrites a user-typed number,
-    // even one that happens to equal DEFAULT_BILL_RATE.
-    React.useEffect(() => {
-      if (!isNew) return;
-      if (!draft.districtId || !draft.spec) return;
-      const stored = draft.billRate;
-      if (stored != null && stored !== '') return;
+    // Bill rate resolves live from the district rate card; only store a
+    // per-gap override when the user explicitly types one. Computed here
+    // so the input's placeholder shows what the gap will bill at if left
+    // blank, and the editor stays in sync when (district, spec) change.
+    const resolvedRate = React.useMemo(() => {
+      if (!draft.districtId || !draft.spec) return null;
       const card = window.rateCardFor
         ? window.rateCardFor(draft.districtId, draft.spec)
         : null;
+      if (Number.isFinite(card) && card > 0) return card;
       const fallback = window.defaultBillFor ? window.defaultBillFor(draft.spec) : null;
-      const next = (Number.isFinite(card) && card > 0)
-        ? card
-        : (Number.isFinite(fallback) && fallback > 0 ? fallback : null);
-      if (next != null) set({ billRate: next });
-    }, [isNew, draft.districtId, draft.spec]);
+      if (Number.isFinite(fallback) && fallback > 0) return fallback;
+      return null;
+    }, [draft.districtId, draft.spec]);
+    // Re-render when a teammate edits a rate card the active gap depends on.
+    if (window.useDistrictRateCards) window.useDistrictRateCards();
 
     const scopeOptions = React.useMemo(() => {
       const out = [];
@@ -143,10 +141,17 @@
     const handleSave = () => {
       if (!draft.districtName && !draft.schoolName) { setScopeOpen(true); return; }
       if (!draft.spec || !draft.state) return;
+      // Only persist an explicit override. When left blank, the gap
+      // resolves through the district rate card at render time, so the
+      // displayed rate stays live if the card changes later.
+      const typed = draft.billRate;
+      const override = (typed == null || typed === '')
+        ? null
+        : (Number(typed) > 0 ? Number(typed) : null);
       onSave({
         ...draft,
         hours: Number(draft.hours) || 0,
-        billRate: Number(draft.billRate) || DEFAULT_BILL_RATE,
+        billRate: override,
       });
     };
 
@@ -278,9 +283,14 @@
                 <div style={styles.label}>Bill rate ($ / hr)</div>
                 <input type="number" min="0" step="1"
                   value={draft.billRate == null ? '' : draft.billRate}
-                  placeholder={String(DEFAULT_BILL_RATE)}
+                  placeholder={resolvedRate != null ? String(resolvedRate) : String(DEFAULT_BILL_RATE)}
                   onChange={(e) => set({ billRate: e.target.value })}
                   style={styles.input} />
+                <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 4 }}>
+                  {resolvedRate != null
+                    ? `Leave blank to use the ${draft.districtName || 'district'} rate card (${'$' + resolvedRate}/hr). Type a value to override for this gap.`
+                    : `Leave blank to use the district rate card. Type a value to override.`}
+                </div>
               </div>
               <div>
                 <div style={styles.label}>Status</div>
