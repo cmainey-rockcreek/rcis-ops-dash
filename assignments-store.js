@@ -42,7 +42,6 @@ window.AssignmentsStore = (() => {
       indirectHours: Number(r.indirect_hours) || 0,
       indirectOverride: !!r.indirect_override,
       payRate: r.pay_rate != null ? Number(r.pay_rate) : null,
-      billRate: r.bill_rate != null ? Number(r.bill_rate) : null,
       startDate: r.start_date || null,
       endDate: r.end_date || null,
       status: r.status || 'active',
@@ -69,7 +68,6 @@ window.AssignmentsStore = (() => {
       indirect_hours: a.indirectHours || 0,
       indirect_override: !!a.indirectOverride,
       pay_rate: a.payRate != null ? a.payRate : null,
-      bill_rate: a.billRate != null ? a.billRate : null,
       start_date: a.startDate || null,
       end_date: a.endDate || null,
       status: a.status || 'active',
@@ -153,7 +151,7 @@ window.AssignmentsStore = (() => {
         districtId: null, districtName: '',
         spec: '',
         directHours: 0, indirectHours: 0, indirectOverride: false,
-        payRate: null, billRate: null,
+        payRate: null,
         startDate: null, endDate: null,
         status: 'active', note: '',
         attachments: [],
@@ -244,17 +242,34 @@ window.useAssignments = function useAssignments() {
 // Persisted always wins on id collision (which shouldn't happen — mock has
 // no id). Returns objects shaped like the mock format so existing UI keeps
 // working: { schoolId, school, district, state, startDate, endDate,
-// hoursPerWeek, direct, indirect, status, payRate?, billRate?, _id?, source,
+// hoursPerWeek, direct, indirect, status, payRate?, _id?, source,
 // attachments? }.
 window.useContractorAssignments = function useContractorAssignments(c) {
   const persisted = window.useAssignments();
   // Subscribe so admin's per-spec ratio edits flow through to indirect /
   // revenue / margin instead of being trapped behind the memo.
   const specSettings = window.useSpecSettings ? window.useSpecSettings() : null;
+  // Subscribe so a district rate-card edit re-derives downstream margin
+  // numbers (effectiveBill reads window.rateCardFor at call time, but
+  // consumers only re-run when this array's identity changes).
+  const rateCards = window.useDistrictRateCards ? window.useDistrictRateCards() : null;
   return React.useMemo(() => {
+    const schools = (window.RCIS_DATA && window.RCIS_DATA.SCHOOLS) || [];
+    const lookupDistrict = (schoolId) => {
+      if (!schoolId) return null;
+      const s = schools.find((x) => x.id === schoolId);
+      return s ? s.district : null;
+    };
     // Mock seed rows don't carry a spec — borrow the contractor's so Net
     // Margin can subtract burden the same way it does for real assignments.
-    const mock = (c && c.assignments) ? c.assignments.map((m) => ({ ...m, spec: m.spec || (c && c.spec) || '', source: 'mock' })) : [];
+    // Derive districtId from schoolId so effectiveBill can look up the
+    // rate card.
+    const mock = (c && c.assignments) ? c.assignments.map((m) => ({
+      ...m,
+      spec: m.spec || (c && c.spec) || '',
+      districtId: m.districtId || lookupDistrict(m.schoolId) || null,
+      source: 'mock',
+    })) : [];
     const real = persisted.filter((a) => a.contractorId === (c && c.id)).map((a) => {
       const direct = Number(a.directHours) || 0;
       // Re-derive at render time using the current per-spec ratio; the
@@ -266,7 +281,7 @@ window.useContractorAssignments = function useContractorAssignments(c) {
         _id: a.id,
         schoolId: a.schoolId || null,
         school: a.schoolName || '',
-        districtId: a.districtId || null,
+        districtId: a.districtId || lookupDistrict(a.schoolId) || null,
         district: a.districtName || '',
         state: '',
         startDate: a.startDate || '',
@@ -274,7 +289,7 @@ window.useContractorAssignments = function useContractorAssignments(c) {
         hoursPerWeek: direct + indirect,
         direct, indirect,
         indirectOverride: a.indirectOverride,
-        payRate: a.payRate, billRate: a.billRate,
+        payRate: a.payRate,
         status: a.status || 'active',
         spec: a.spec || '',
         attachments: Array.isArray(a.attachments) ? a.attachments : [],
@@ -283,7 +298,7 @@ window.useContractorAssignments = function useContractorAssignments(c) {
       };
     });
     return [...real, ...mock];
-  }, [c, persisted, specSettings]);
+  }, [c, persisted, specSettings, rateCards]);
 };
 
 // Live "booked hours this week" for a contractor: sums active mock + active

@@ -346,6 +346,29 @@ values
   ('SPED', 0.25, 0, 50, 70,  78, 105)
 on conflict (spec_code) do nothing;
 
+-- ─── district_rate_cards ─────────────────────────────────────────────────
+-- Bill rate is set per (district × specialty), not per contractor: every
+-- SLP in a given district bills at the same rate; the rate per specialty
+-- varies by district. Each assignment derives its bill rate from this card
+-- via its district + the contractor's specialty (looked up, not stored on
+-- the assignment). When no row exists for a (district, spec) pair,
+-- financials.js falls back to spec_settings.default_bill_low so prototype
+-- numbers don't collapse to $0 before each district is filled in.
+create table if not exists public.district_rate_cards (
+  district_id  text not null,
+  spec_code    text not null,
+  bill_rate    numeric not null,
+  updated_at   timestamptz not null default now(),
+  primary key (district_id, spec_code)
+);
+create index if not exists district_rate_cards_district_idx on public.district_rate_cards (district_id);
+
+-- Bill rate is now derived. Drop the contractor-level and assignment-level
+-- bill_rate columns wherever they exist — the rate card is the source.
+alter table public.contractors          drop column if exists bill_rate;
+alter table public.contractor_overrides drop column if exists bill_rate;
+alter table public.assignments          drop column if exists bill_rate;
+
 -- ─── Auto-update updated_at on row updates ────────────────────────────────
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql as $$
@@ -409,6 +432,10 @@ create trigger touch_spec_settings before update on public.spec_settings
 
 drop trigger if exists touch_contractors on public.contractors;
 create trigger touch_contractors before update on public.contractors
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_district_rate_cards on public.district_rate_cards;
+create trigger touch_district_rate_cards before update on public.district_rate_cards
   for each row execute function public.touch_updated_at();
 
 -- ─── Auth user → team profile automation ─────────────────────────────────
@@ -503,6 +530,7 @@ alter table public.documents     enable row level security;
 alter table public.entity_notes  enable row level security;
 alter table public.spec_settings enable row level security;
 alter table public.contractors enable row level security;
+alter table public.district_rate_cards enable row level security;
 
 drop policy if exists "team full access" on public.todos;
 create policy "team full access" on public.todos
@@ -608,6 +636,10 @@ drop policy if exists "team full access" on public.contractors;
 create policy "team full access" on public.contractors
   for all to authenticated using (true) with check (true);
 
+drop policy if exists "team full access" on public.district_rate_cards;
+create policy "team full access" on public.district_rate_cards
+  for all to authenticated using (true) with check (true);
+
 -- ─── Realtime ─────────────────────────────────────────────────────────────
 -- Lets the app receive live updates when teammates change anything.
 do $$ begin
@@ -676,5 +708,9 @@ exception when duplicate_object then null;
 end $$;
 do $$ begin
   alter publication supabase_realtime add table public.contractors;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.district_rate_cards;
 exception when duplicate_object then null;
 end $$;

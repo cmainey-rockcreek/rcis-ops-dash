@@ -175,3 +175,15 @@ window.burdenFor = function burdenFor(specCode) {
   }
   return Number(s.burdenPerBillableHour);
 };
+
+// Per-spec default bill rate — used as the financials.effectiveBill
+// fallback when no district_rate_cards row exists for a (district, spec).
+// Returns the spec's `default_bill_low` (a prototype-friendly floor) so
+// margin numbers don't collapse to $0 before each district is filled in.
+// Falls back to 0 when neither spec nor default exists.
+window.defaultBillFor = function defaultBillFor(specCode) {
+  if (!specCode) return 0;
+  const s = window.SpecSettingsStore.get()[specCode];
+  if (!s || s.defaultBillLow == null || !Number.isFinite(Number(s.defaultBillLow))) return 0;
+  return Number(s.defaultBillLow);
+};

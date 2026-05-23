@@ -872,8 +872,10 @@
     const assignments = window.useAssignments  ? window.useAssignments()  : [];
     const overrides   = window.useContractorOverrides ? window.useContractorOverrides() : {};
     // Subscribe so admin's per-spec indirect ratio edits flow through to
-    // the revenue tile (autoIndirect uses the current ratio).
+    // the revenue tile (autoIndirect uses the current ratio), and so any
+    // district's rate card edit re-derives the tile live.
     if (window.useSpecSettings) window.useSpecSettings();
+    if (window.useDistrictRateCards) window.useDistrictRateCards();
 
     const today = new Date().toLocaleDateString('en-US', {
       weekday: 'long', month: 'long', day: 'numeric',
@@ -898,7 +900,10 @@
       c.status === 'avail' || c.status === 'partial' || c.status === 'full').length;
 
     // Annualized revenue + weekly booked hours across all active assignments
-    // (real Supabase rows merged with mock seed assignments).
+    // (real Supabase rows merged with mock seed assignments). Bill rate is
+    // derived per row by financials.effectiveBill from the district rate
+    // card + spec — schoolId/districtId/spec must ride along so the
+    // lookup can resolve.
     let totalAnnualRev = 0;
     let weeklyBookedHours = 0;
     const F = window.ContractorFinancials;
@@ -907,7 +912,11 @@
         const c = window.applyContractorOverride
           ? window.applyContractorOverride(rawC, overrides)
           : rawC;
-        const mock = (rawC.assignments || []).map((m) => ({ ...m, source: 'mock' }));
+        const mock = (rawC.assignments || []).map((m) => ({
+          ...m,
+          spec: m.spec || (rawC && rawC.spec) || '',
+          source: 'mock',
+        }));
         const real = assignments
           .filter((a) => a.contractorId === rawC.id)
           .map((a) => {
@@ -919,11 +928,13 @@
             return {
               direct, indirect, status: a.status || 'active',
               spec: a.spec || '',
-              payRate: a.payRate, billRate: a.billRate,
+              schoolId: a.schoolId || null,
+              districtId: a.districtId || null,
+              payRate: a.payRate,
             };
           });
         const merged = [...real, ...mock];
-        const defaults = { bill: c.rates && c.rates.bill, pay: c.rates && c.rates.hourly };
+        const defaults = { pay: c.rates && c.rates.hourly, spec: c.spec };
         totalAnnualRev   += F.annualRevenue(merged, defaults);
         weeklyBookedHours += F.weeklyHours
           ? merged.filter((a) => a.status === 'active').reduce((s, a) => s + F.weeklyHours(a), 0)

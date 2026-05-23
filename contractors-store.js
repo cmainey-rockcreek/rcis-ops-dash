@@ -38,8 +38,7 @@ window.ContractorsStore = (() => {
       npi: r.npi || '',
       hireDate: r.hire_date || null,
       rates: {
-        hourly: r.pay_rate  != null ? Number(r.pay_rate)  : 0,
-        bill:   r.bill_rate != null ? Number(r.bill_rate) : 0,
+        hourly: r.pay_rate != null ? Number(r.pay_rate) : 0,
       },
       licenses: [],
       schedule: [],
@@ -69,7 +68,6 @@ window.ContractorsStore = (() => {
       npi: c.npi || null,
       hire_date: c.hireDate || null,
       pay_rate: c.rates && c.rates.hourly != null ? c.rates.hourly : null,
-      bill_rate: c.rates && c.rates.bill   != null ? c.rates.bill   : null,
       created_by: c.createdBy || null,
     };
   }
@@ -171,7 +169,7 @@ window.ContractorsStore = (() => {
         city: '',
         npi: '',
         hireDate: null,
-        rates: { hourly: 0, bill: 0 },
+        rates: { hourly: 0 },
         licenses: [], schedule: [], assignments: [], documents: [],
         notes: '',
         createdBy: current ? current.id : null,
@@ -195,9 +193,8 @@ window.ContractorsStore = (() => {
       const existing = state.find((c) => c.id === id);
       if (!existing) return;
       const next = { ...existing, ...patch, updatedAt: Date.now() };
-      // Patch may carry top-level pay/bill rate; normalize into rates.{}.
+      // Patch may carry a top-level pay rate; normalize into rates.{}.
       if (patch.payRate != null)  next.rates = { ...(next.rates || {}), hourly: patch.payRate };
-      if (patch.billRate != null) next.rates = { ...(next.rates || {}), bill: patch.billRate };
       setState(state.map((c) => c.id === id ? next : c));
       const row = toRow(next);
       delete row.id;

@@ -1,6 +1,7 @@
 // ContractorOverridesStore — per-contractor edits on top of the mock
-// defaults in data-contractors.js. Stores pay rate, bill rate, and the
-// weekly schedule (5 days × 4 blocks).
+// defaults in data-contractors.js. Stores pay rate and the weekly
+// schedule (5 days × 4 blocks). Bill rate is no longer a contractor-level
+// field — it's derived from the district rate card per assignment.
 //
 // Pattern mirrors RenewalsStore. When no row exists for a contractor, the
 // mock values from data-contractors.js win.
@@ -14,7 +15,6 @@ window.ContractorOverridesStore = (() => {
       contractorId: r.contractor_id,
       name: r.name || null,
       payRate: r.pay_rate != null ? Number(r.pay_rate) : null,
-      billRate: r.bill_rate != null ? Number(r.bill_rate) : null,
       schedule: Array.isArray(r.schedule) ? r.schedule : null,
       email: r.email || null,
       phone: r.phone || null,
@@ -27,7 +27,6 @@ window.ContractorOverridesStore = (() => {
       contractor_id: o.contractorId,
       name: o.name || null,
       pay_rate: o.payRate != null ? o.payRate : null,
-      bill_rate: o.billRate != null ? o.billRate : null,
       schedule: o.schedule || null,
       email: o.email || null,
       phone: o.phone || null,
@@ -130,8 +129,7 @@ window.useContractorView = function useContractorView(c) {
     const o = all[c.id] || {};
     const rates = {
       ...(c.rates || {}),
-      hourly: o.payRate  != null ? o.payRate  : (c.rates && c.rates.hourly),
-      bill:   o.billRate != null ? o.billRate : (c.rates && c.rates.bill),
+      hourly: o.payRate != null ? o.payRate : (c.rates && c.rates.hourly),
     };
     const schedule = o.schedule || c.schedule;
     return {
@@ -156,8 +154,7 @@ window.applyContractorOverride = function applyContractorOverride(c, overridesMa
   if (!o) return c;
   const rates = {
     ...(c.rates || {}),
-    hourly: o.payRate  != null ? o.payRate  : (c.rates && c.rates.hourly),
-    bill:   o.billRate != null ? o.billRate : (c.rates && c.rates.bill),
+    hourly: o.payRate != null ? o.payRate : (c.rates && c.rates.hourly),
   };
   return {
     ...c,
@@ -196,8 +193,7 @@ window.useContractorsView = function useContractorsView(contractors) {
       if (!o) return c;
       const rates = {
         ...(c.rates || {}),
-        hourly: o.payRate  != null ? o.payRate  : (c.rates && c.rates.hourly),
-        bill:   o.billRate != null ? o.billRate : (c.rates && c.rates.bill),
+        hourly: o.payRate != null ? o.payRate : (c.rates && c.rates.hourly),
       };
       return {
         ...c,

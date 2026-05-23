@@ -35,10 +35,6 @@ from this file in that same commit.
 
 ### Prototype work — do first
 
-- **Bill rate model.** Bill rate is set per (district × specialty), not per
-  contractor. Add a district rate card (specialty → rate); each assignment
-  derives its bill rate from its district plus the contractor's specialty.
-  Remove the contractor-level bill rate and update `financials.js` to match.
 - **Invite users from the Admin page (lightweight).** Pre-add a teammate
   (name, email, role) as a pending profile; they self-sign-up with that email
   and get linked to the profile. No backend, no system-sent email. The full

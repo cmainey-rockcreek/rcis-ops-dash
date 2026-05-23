@@ -25,12 +25,21 @@
         const c = (window.getContractorEnriched || window.getContractor)(cov.contractorId);
         if (!c) continue;
         const hrs = cov.hoursPerWeek || 0;
-        const bill = c.rates.bill || 0;
+        const spec = cov.spec || c.spec;
+        // Bill rate comes from the district rate card for (this district,
+        // this spec); falls back to the per-spec default in /admin so
+        // prototype rollups don't collapse to $0 before the rate card is
+        // filled in. The card is the same source effectiveBill uses in
+        // financials.js.
+        const rateCard = window.rateCardFor ? window.rateCardFor(districtId, spec) : null;
+        const bill = Number.isFinite(rateCard) && rateCard > 0
+          ? rateCard
+          : (window.defaultBillFor ? window.defaultBillFor(spec) : 0);
         const pay  = c.rates.hourly || 0;
         // Key burden off the coverage row's spec (the role being delivered),
         // not the contractor's primary spec — matches the assignment-level
         // logic in financials.js and the Matchmaker shortlist.
-        const burden = window.burdenFor ? window.burdenFor(cov.spec || c.spec) : 0;
+        const burden = window.burdenFor ? window.burdenFor(spec) : 0;
         weeklyHours += hrs;
         annualRevenue   += bill * hrs * WEEKS;
         annualMargin    += (bill - pay) * hrs * WEEKS;
@@ -83,8 +92,10 @@
       ? window.useDistrictsView(window.RCIS_DATA.DISTRICTS)
       : window.RCIS_DATA.DISTRICTS;
     // Subscribe so the rollup recomputes when admin tweaks per-spec burden
-    // (rollup reads window.burdenFor inside its loop).
+    // (rollup reads window.burdenFor inside its loop) or any district rate
+    // card changes (rollup reads window.rateCardFor inside its loop).
     const specSettings = window.useSpecSettings ? window.useSpecSettings() : null;
+    const rateCards = window.useDistrictRateCards ? window.useDistrictRateCards() : null;
 
     const rows = React.useMemo(() => {
       const q = query.trim().toLowerCase();
@@ -106,7 +117,7 @@
         if (av > bv) return  dirMul;
         return 0;
       });
-    }, [enriched, query, sort, specSettings]);
+    }, [enriched, query, sort, specSettings, rateCards]);
 
     const totals = React.useMemo(() => {
       let students = 0, revenue = 0, contractors = new Set();
@@ -338,8 +349,11 @@
   }
 
   function DistrictDetail({ pal, id }) {
-    // Subscribe so Net Margin re-renders when admin edits burden per spec.
+    // Subscribe so revenue + Net Margin re-render when admin edits burden
+    // per spec, and so the header KPIs + rollup re-derive when this
+    // district's rate card changes.
     if (window.useSpecSettings) window.useSpecSettings();
+    if (window.useDistrictRateCards) window.useDistrictRateCards();
     const base = window.RCIS_DATA.DISTRICTS.find((x) => x.id === id);
     const d = window.useDistrictView ? window.useDistrictView(base) : base;
     if (!d) {
@@ -381,6 +395,7 @@
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
             <RevenueCard r={r} pal={pal} />
+            <BillRatesCard d={d} pal={pal} />
             <LinkedTodosCard d={d} pal={pal} />
             <ContractCard d={d} pal={pal} />
             <window.DocumentsSection pal={pal} scope="district" scopeId={d.id} />
@@ -774,6 +789,141 @@
           </div>
         </div>
       </Section>
+    );
+  }
+
+  // Bill rates card — the district's rate card (specialty → $/hr). Every
+  // assignment in this district derives its bill rate from the row matching
+  // the contractor's specialty. Blank rows fall back to the per-spec
+  // default in /admin (`spec_settings.default_bill_low`) so prototype
+  // margin numbers don't collapse to $0.
+  function BillRatesCard({ d, pal }) {
+    const SPECS = (window.RCIS_DATA && window.RCIS_DATA.SPECIALTIES) || [];
+    // Subscribe so a teammate's edit updates this card and every margin
+    // display in the app live (effectiveBill reads rateCardFor at render).
+    const cards = window.useDistrictRateCards ? window.useDistrictRateCards() : {};
+    return (
+      <Section pal={pal} title="Bill rates" badge={SPECS.length}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <div style={{
+            display: 'grid', gridTemplateColumns: '60px 1fr 110px',
+            gap: 10, alignItems: 'center',
+            fontSize: 9.5, fontWeight: 700, letterSpacing: 0.6,
+            color: pal.textFaint, textTransform: 'uppercase',
+            borderBottom: `1px solid ${pal.borderSoft}`, paddingBottom: 6,
+          }}>
+            <span>Code</span>
+            <span>Specialty</span>
+            <span style={{ textAlign: 'right' }}>$ / hr</span>
+          </div>
+          {SPECS.map((sp) => {
+            const stored = window.DistrictRateCardStore
+              ? window.DistrictRateCardStore.rateFor(d.id, sp.code)
+              : null;
+            const fallback = window.defaultBillFor ? window.defaultBillFor(sp.code) : 0;
+            return (
+              <div key={sp.code} style={{
+                display: 'grid', gridTemplateColumns: '60px 1fr 110px',
+                gap: 10, alignItems: 'center',
+                padding: '8px 0',
+                borderBottom: `1px solid ${pal.borderSoft}`,
+              }}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '3px 8px', borderRadius: 5,
+                  background: (sp.color || pal.accent) + '20',
+                  color: sp.color || pal.accent,
+                  fontSize: 11, fontWeight: 700, letterSpacing: 0.4,
+                  width: 'fit-content',
+                }}>{sp.code}</span>
+                <span style={{ fontSize: 12.5, color: pal.text }}>{sp.name}</span>
+                <BillRateCell pal={pal}
+                  value={stored}
+                  fallback={fallback}
+                  onSave={(v) => v == null
+                    ? window.DistrictRateCardStore.remove(d.id, sp.code)
+                    : window.DistrictRateCardStore.upsert(d.id, sp.code, v)}
+                />
+              </div>
+            );
+          })}
+        </div>
+        <div style={{
+          fontSize: 10.5, color: pal.textFaint, paddingTop: 8, lineHeight: 1.5,
+        }}>
+          Blank rows fall back to the per-specialty default from /admin so
+          margins keep computing while you fill in real rates.
+        </div>
+      </Section>
+    );
+  }
+
+  // Inline-editable bill-rate cell. Click to edit; Enter / blur saves; Esc
+  // cancels. Clearing the value removes the row (the card then falls back
+  // to the per-spec default). Mirrors NumberCell in /admin.
+  function BillRateCell({ pal, value, fallback, onSave }) {
+    const [editing, setEditing] = React.useState(false);
+    const display = value != null ? `$${value}` : (fallback > 0 ? `$${fallback}` : '—');
+    const isDefault = value == null;
+    const [draft, setDraft] = React.useState(value != null ? String(value) : '');
+    const inputRef = React.useRef(null);
+
+    React.useEffect(() => {
+      if (editing && inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
+    }, [editing]);
+
+    const start = () => { setDraft(value != null ? String(value) : ''); setEditing(true); };
+    const commit = () => {
+      const raw = draft.trim();
+      if (raw === '') { if (value != null) onSave(null); setEditing(false); return; }
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed < 0) { setEditing(false); return; }
+      if (parsed !== value) onSave(parsed);
+      setEditing(false);
+    };
+    const cancel = () => { setDraft(value != null ? String(value) : ''); setEditing(false); };
+    const onKey = (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    };
+
+    if (editing) {
+      return (
+        <span style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 3 }}>
+          <span style={{ fontSize: 12, color: pal.textFaint }}>$</span>
+          <input ref={inputRef} type="number" step="1" min="0"
+            value={draft}
+            placeholder={fallback > 0 ? String(fallback) : ''}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit} onKeyDown={onKey}
+            style={{
+              padding: '4px 8px', fontSize: 12.5,
+              color: pal.text, background: pal.cardAlt,
+              border: `1px solid ${pal.accent}`, borderRadius: 6,
+              outline: 'none', fontFamily: 'ui-monospace, monospace',
+              textAlign: 'right', width: 80,
+            }} />
+        </span>
+      );
+    }
+    return (
+      <span onClick={start}
+        title={isDefault ? 'Default — click to set a district-specific rate' : 'Click to edit'}
+        style={{
+          display: 'inline-flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 3,
+          marginLeft: 'auto', padding: '3px 8px',
+          fontSize: 12.5,
+          color: isDefault ? pal.textFaint : pal.text,
+          fontStyle: isDefault ? 'italic' : 'normal',
+          fontWeight: 500,
+          fontFamily: 'ui-monospace, monospace',
+          cursor: 'pointer',
+          border: '1px dashed transparent', borderRadius: 5,
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.borderColor = pal.borderSoft}
+        onMouseLeave={(e) => e.currentTarget.style.borderColor = 'transparent'}>
+        {display}
+      </span>
     );
   }
 

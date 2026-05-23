@@ -33,8 +33,11 @@
   const TOP_N = 5;
   const ONSITE_RADIUS_MILES = 100;
 
-  // Flat default bill rate. Each gap carries its own `billRate` on the row;
-  // inline edits in the Matchmaker write directly to Supabase via GapsStore.
+  // Default bill rate for an open gap when neither the gap nor the
+  // district rate card has one set. Each gap carries its own `billRate`
+  // override on the row; inline edits in the Matchmaker write directly to
+  // Supabase via GapsStore. The gap-editor prefills new gaps from the
+  // district rate card when (districtId, spec) is known.
   const DEFAULT_BILL_RATE = 85;
 
   function effectiveRate(gap, overrides) {
@@ -326,10 +329,11 @@
         await window.MatchProposalsStore.dismiss(proposal.id);
         return;
       }
-      // Create the assignment.
+      // Create the assignment. Bill rate is no longer stored on the row —
+      // it's derived from the district rate card by financials.effectiveBill
+      // when revenue/margin is computed.
       const today = new Date().toISOString().slice(0, 10);
       const directHours = Number(gap.hours) || 0;
-      const billRate = gap.billRate != null ? Number(gap.billRate) : null;
       const payRate  = contractor.rates && contractor.rates.hourly != null ? Number(contractor.rates.hourly) : null;
       const created = await window.AssignmentsStore.add({
         contractorId: contractor.id,
@@ -340,7 +344,7 @@
         districtName: gap.districtName || '',
         spec: gap.spec || '',
         directHours,
-        payRate, billRate,
+        payRate,
         startDate: today,
         status: 'active',
         note: proposal.note || '',

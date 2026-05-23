@@ -249,7 +249,6 @@
       email: '',
       phone: '',
       payRate: '',
-      billRate: '',
     });
     const [saving, setSaving] = React.useState(false);
 
@@ -280,8 +279,7 @@
           email: draft.email.trim() || '',
           phone: draft.phone.trim() || '',
           rates: {
-            hourly: draft.payRate  !== '' ? Number(draft.payRate)  : 0,
-            bill:   draft.billRate !== '' ? Number(draft.billRate) : 0,
+            hourly: draft.payRate !== '' ? Number(draft.payRate) : 0,
           },
         });
       } finally { setSaving(false); }
@@ -353,18 +351,13 @@
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <div style={labelStyle}>Pay rate ($/hr)</div>
-                <input type="number" min="0" step="1" value={draft.payRate} style={inputStyle}
-                  placeholder="e.g. 70"
-                  onChange={(e) => set({ payRate: e.target.value })} />
-              </div>
-              <div>
-                <div style={labelStyle}>Bill rate ($/hr)</div>
-                <input type="number" min="0" step="1" value={draft.billRate} style={inputStyle}
-                  placeholder="e.g. 100"
-                  onChange={(e) => set({ billRate: e.target.value })} />
+            <div>
+              <div style={labelStyle}>Pay rate ($/hr)</div>
+              <input type="number" min="0" step="1" value={draft.payRate} style={inputStyle}
+                placeholder="e.g. 70"
+                onChange={(e) => set({ payRate: e.target.value })} />
+              <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 4 }}>
+                Bill rate is set per district on the district profile.
               </div>
             </div>
 
@@ -643,7 +636,13 @@
       ? window.useContractorAssignments(c)
       : (c.assignments || []);
     const F = window.ContractorFinancials || {};
-    const defaults = { bill: c.rates && c.rates.bill, pay: c.rates && c.rates.hourly, spec: c.spec };
+    // Bill rate now flows from the district rate card per row; `pay` is
+    // still a contractor-level default since the contractor's pay rate
+    // does not vary by district. `spec` lets effectiveBill fall back to
+    // the per-spec default when a district hasn't filled out its card.
+    const defaults = { pay: c.rates && c.rates.hourly, spec: c.spec };
+    // Subscribe so header KPIs re-derive when any district rate card changes.
+    if (window.useDistrictRateCards) window.useDistrictRateCards();
     // Annualized at the 36-week school year — matches the Matchmaker page so
     // both views agree on what the same hours/rates earn over a contract.
     // Subscribe so Net Margin re-renders when admin edits a burden value.
@@ -702,9 +701,6 @@
             <EditableRateKpi pal={pal} label="Pay Rate"
               value={c.rates.hourly}
               onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { payRate: v })} />
-            <EditableRateKpi pal={pal} label="Bill Rate"
-              value={c.rates.bill}
-              onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { billRate: v })} />
             <Kpi pal={pal} label="Load"     value={`${booked}h`}     sub={`of ${c.cap}h`} />
             <Kpi pal={pal} label="Revenue"     value={fmt(annualRev)} sub="/year"
                  valueColor={pal.accent} />
@@ -1461,7 +1457,6 @@
         contractorName: c.name,
         spec: c.spec || '',
         payRate: c.rates ? c.rates.hourly : null,
-        billRate: c.rates ? c.rates.bill : null,
         startDate: new Date().toISOString().slice(0, 10),
         status: 'active',
       },
@@ -1586,7 +1581,15 @@
               <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{a.direct}h</div>
               <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', color: pal.textSoft, fontVariantNumeric: 'tabular-nums' }}>{a.indirect}h</div>
               <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', color: pal.textSoft, fontVariantNumeric: 'tabular-nums' }}>
-                {a.billRate != null ? `$${a.billRate}` : '—'}
+                {(() => {
+                  // Bill rate is derived from the district rate card (or
+                  // per-spec default) — same resolution effectiveBill uses
+                  // for revenue math, so what the user sees matches what
+                  // the rollups computed.
+                  const F = window.ContractorFinancials;
+                  const r = F && F.effectiveBill ? F.effectiveBill(a, 0, a.spec) : 0;
+                  return r > 0 ? `$${Math.round(r)}` : '—';
+                })()}
               </div>
               <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', fontSize: 11, color: pal.textFaint }}>
                 {active ? formatDate(a.startDate) : `${formatDateShort(a.startDate)} → ${formatDateShort(a.endDate)}`}
@@ -1610,7 +1613,7 @@
       districtId: null, districtName: '',
       spec: '',
       directHours: 0, indirectHours: 0, indirectOverride: false,
-      payRate: null, billRate: null,
+      payRate: null,
       startDate: '', endDate: '',
       status: 'active', note: '',
       attachments: [],
@@ -1710,8 +1713,7 @@
         ...draft,
         directHours:   direct,
         indirectHours: indirect,
-        payRate:  draft.payRate  != null && draft.payRate  !== '' ? Number(draft.payRate)  : null,
-        billRate: draft.billRate != null && draft.billRate !== '' ? Number(draft.billRate) : null,
+        payRate:  draft.payRate != null && draft.payRate !== '' ? Number(draft.payRate) : null,
       });
     };
 
@@ -1860,21 +1862,15 @@
               </div>
             </div>
 
-            {/* Rates */}
-            <div style={s.row}>
-              <div>
-                <div style={s.label}>Pay rate ($ / hr)</div>
-                <input type="number" min="0" step="1" style={s.input}
-                  value={draft.payRate == null ? '' : draft.payRate}
-                  onChange={(e) => set({ payRate: e.target.value })}
-                  placeholder="Contractor default" />
-              </div>
-              <div>
-                <div style={s.label}>Bill rate ($ / hr)</div>
-                <input type="number" min="0" step="1" style={s.input}
-                  value={draft.billRate == null ? '' : draft.billRate}
-                  onChange={(e) => set({ billRate: e.target.value })}
-                  placeholder="School/district rate" />
+            {/* Pay rate (bill rate is now derived from the district rate card). */}
+            <div>
+              <div style={s.label}>Pay rate ($ / hr)</div>
+              <input type="number" min="0" step="1" style={s.input}
+                value={draft.payRate == null ? '' : draft.payRate}
+                onChange={(e) => set({ payRate: e.target.value })}
+                placeholder="Contractor default" />
+              <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 4 }}>
+                Bill rate comes from the {draft.districtName || 'district'} rate card.
               </div>
             </div>
 

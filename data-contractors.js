@@ -75,21 +75,22 @@
     return s;
   }
 
-  // ─── Rates by specialty (typical band, slight per-contractor variance) ────
+  // ─── Pay rate by specialty (typical band, slight per-contractor variance) ─
+  // Bill rate is no longer per-contractor — it comes from the district
+  // rate card via the contractor's specialty. See district-rate-card-store.
   const RATE_BAND = {
-    SLP:  { hourly: [58, 78], bill: [88, 115] },
-    OT:   { hourly: [60, 80], bill: [90, 120] },
-    PT:   { hourly: [62, 82], bill: [92, 125] },
-    PSY:  { hourly: [68, 92], bill: [100, 145] },
-    BCBA: { hourly: [65, 88], bill: [95, 135] },
-    MH:   { hourly: [55, 75], bill: [85, 110] },
-    SPED: { hourly: [50, 70], bill: [78, 105] },
+    SLP:  { hourly: [58, 78] },
+    OT:   { hourly: [60, 80] },
+    PT:   { hourly: [62, 82] },
+    PSY:  { hourly: [68, 92] },
+    BCBA: { hourly: [65, 88] },
+    MH:   { hourly: [55, 75] },
+    SPED: { hourly: [50, 70] },
   };
   function ratesFor(rand, spec) {
     const band = RATE_BAND[spec] || RATE_BAND.SLP;
     return {
       hourly: int(rand, band.hourly[0], band.hourly[1]),
-      bill:   int(rand, band.bill[0],   band.bill[1]),
     };
   }
 

@@ -37,7 +37,10 @@
       hours: 8,
       modality: 'onsite',
       priority: 'medium',
-      billRate: DEFAULT_BILL_RATE,
+      // Empty until either (a) the prefill effect resolves a value from
+      // the district rate card / spec default, or (b) the user types one.
+      // handleSave falls back to DEFAULT_BILL_RATE if it's still blank.
+      billRate: null,
       note: '',
       status: 'open',
       attachments: [],
@@ -68,6 +71,25 @@
     });
 
     const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+
+    // Prefill bill rate from the district rate card when a new gap arrives
+    // with a known (district, spec). Only fills when the user hasn't typed
+    // a value yet (null / blank) — never overwrites a user-typed number,
+    // even one that happens to equal DEFAULT_BILL_RATE.
+    React.useEffect(() => {
+      if (!isNew) return;
+      if (!draft.districtId || !draft.spec) return;
+      const stored = draft.billRate;
+      if (stored != null && stored !== '') return;
+      const card = window.rateCardFor
+        ? window.rateCardFor(draft.districtId, draft.spec)
+        : null;
+      const fallback = window.defaultBillFor ? window.defaultBillFor(draft.spec) : null;
+      const next = (Number.isFinite(card) && card > 0)
+        ? card
+        : (Number.isFinite(fallback) && fallback > 0 ? fallback : null);
+      if (next != null) set({ billRate: next });
+    }, [isNew, draft.districtId, draft.spec]);
 
     const scopeOptions = React.useMemo(() => {
       const out = [];
@@ -255,7 +277,8 @@
               <div>
                 <div style={styles.label}>Bill rate ($ / hr)</div>
                 <input type="number" min="0" step="1"
-                  value={draft.billRate}
+                  value={draft.billRate == null ? '' : draft.billRate}
+                  placeholder={String(DEFAULT_BILL_RATE)}
                   onChange={(e) => set({ billRate: e.target.value })}
                   style={styles.input} />
               </div>

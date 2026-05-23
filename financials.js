@@ -5,10 +5,30 @@
 // utilization targets, true-profit calcs, district profitability, etc.
 //
 // Input shapes the helpers accept:
-//   row = { direct, indirect, status, billRate?, payRate? }  (merged shape
-//   from useContractorAssignments — works for both mock and Supabase rows)
-//   defaults = { bill, pay } — contractor-level fallback when an
-//   assignment doesn't carry its own rate (e.g. mock seeds).
+//   row = { direct, indirect, status, payRate?, spec?, districtId?, schoolId? }
+//     (merged shape from useContractorAssignments — works for both mock
+//     and Supabase rows). Bill rate is derived per-row via the district
+//     rate card; see effectiveBill below.
+//   defaults = { pay, spec } — used when an assignment doesn't carry its
+//     own pay rate (e.g. mock seeds). `spec` lets the no-active-rows
+//     fallback look up the per-spec default bill rate.
+
+// Resolve the district id that owns a given assignment row, regardless of
+// whether the row carries `districtId` directly (persisted assignments,
+// district-wide rows) or only `schoolId` (mock seeds — district is
+// derived from SCHOOLS[schoolId].district). Returns null if neither
+// resolves. Lives here because it's the key used to look up bill rates
+// from district_rate_cards via effectiveBill.
+window.assignmentDistrictId = function assignmentDistrictId(a) {
+  if (!a) return null;
+  if (a.districtId) return a.districtId;
+  if (a.schoolId) {
+    const schools = (window.RCIS_DATA && window.RCIS_DATA.SCHOOLS) || [];
+    const sch = schools.find((s) => s.id === a.schoolId);
+    if (sch && sch.district) return sch.district;
+  }
+  return null;
+};
 
 window.ContractorFinancials = (() => {
   const WEEKS_PER_MONTH = 4;
@@ -18,9 +38,28 @@ window.ContractorFinancials = (() => {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
   }
-  function effectiveBill(a, defBill) {
-    return a && a.billRate != null && Number.isFinite(Number(a.billRate))
-      ? Number(a.billRate) : num(defBill);
+  // Resolve a row's bill rate from the district rate card, in order:
+  //   1. a.billRate              (legacy per-row override, going away)
+  //   2. rateCardFor(districtId, spec)
+  //   3. defaultBillFor(spec)    (spec_settings.default_bill_low — keeps
+  //                               prototype numbers from collapsing to $0)
+  //   4. defaults.bill           (transitional — most callers will drop this)
+  function effectiveBill(a, defBill, defSpec) {
+    if (a && a.billRate != null && Number.isFinite(Number(a.billRate))) {
+      return Number(a.billRate);
+    }
+    const spec = (a && a.spec) || defSpec || null;
+    const districtId = window.assignmentDistrictId
+      ? window.assignmentDistrictId(a) : (a && a.districtId) || null;
+    if (districtId && spec && window.rateCardFor) {
+      const r = window.rateCardFor(districtId, spec);
+      if (Number.isFinite(r) && r > 0) return r;
+    }
+    if (spec && window.defaultBillFor) {
+      const dflt = window.defaultBillFor(spec);
+      if (Number.isFinite(dflt) && dflt > 0) return dflt;
+    }
+    return num(defBill);
   }
   function effectivePay(a, defPay) {
     return a && a.payRate != null && Number.isFinite(Number(a.payRate))
@@ -36,8 +75,9 @@ window.ContractorFinancials = (() => {
   // ─── Revenue ──────────────────────────────────────────────────────────────
   function weeklyRevenue(rows, defaults) {
     const dB = defaults && defaults.bill;
+    const dS = defaults && defaults.spec;
     return activeRows(rows).reduce((sum, a) =>
-      sum + weeklyHours(a) * effectiveBill(a, dB), 0);
+      sum + weeklyHours(a) * effectiveBill(a, dB, dS), 0);
   }
   function monthlyRevenue(rows, defaults) {
     return weeklyRevenue(rows, defaults) * WEEKS_PER_MONTH;
@@ -64,9 +104,11 @@ window.ContractorFinancials = (() => {
     const active = activeRows(rows);
     const totalHours = active.reduce((s, a) => s + weeklyHours(a), 0);
     if (totalHours <= 0) {
-      return num(defaults && defaults.bill) - num(defaults && defaults.pay);
+      // No active rows → fall back to the resolved bill (spec default) − pay.
+      const fallbackBill = effectiveBill(null, defaults && defaults.bill, defaults && defaults.spec);
+      return fallbackBill - num(defaults && defaults.pay);
     }
-    const totalBill = active.reduce((s, a) => s + weeklyHours(a) * effectiveBill(a, defaults && defaults.bill), 0);
+    const totalBill = active.reduce((s, a) => s + weeklyHours(a) * effectiveBill(a, defaults && defaults.bill, defaults && defaults.spec), 0);
     const totalPay  = active.reduce((s, a) => s + weeklyHours(a) * effectivePay(a,  defaults && defaults.pay),  0);
     return (totalBill - totalPay) / totalHours;
   }
@@ -106,14 +148,15 @@ window.ContractorFinancials = (() => {
     const active = activeRows(rows);
     const totalHours = active.reduce((s, a) => s + weeklyHours(a), 0);
     if (totalHours <= 0) {
-      // No active rows → fall back to default bill − default pay − burden
-      // looked up against the contractor-level spec on `defaults`. Callers
-      // that don't carry a spec (older mock paths) get 0 burden, which
-      // keeps the legacy "no spec = no burden" behavior intact.
+      // No active rows → fall back to resolved bill (spec default) − pay
+      // − burden looked up against the contractor-level spec on `defaults`.
+      // Callers that don't carry a spec (older mock paths) get 0 burden,
+      // which keeps the legacy "no spec = no burden" behavior intact.
+      const fallbackBill = effectiveBill(null, defaults && defaults.bill, defaults && defaults.spec);
       const fallbackBurden = defaults && defaults.spec ? num(lookup(defaults.spec)) : 0;
-      return num(defaults && defaults.bill) - num(defaults && defaults.pay) - fallbackBurden;
+      return fallbackBill - num(defaults && defaults.pay) - fallbackBurden;
     }
-    const totalBill   = active.reduce((s, a) => s + weeklyHours(a) * effectiveBill(a, defaults && defaults.bill), 0);
+    const totalBill   = active.reduce((s, a) => s + weeklyHours(a) * effectiveBill(a, defaults && defaults.bill, defaults && defaults.spec), 0);
     const totalPay    = active.reduce((s, a) => s + weeklyHours(a) * effectivePay(a,  defaults && defaults.pay),  0);
     const totalBurden_ = active.reduce((s, a) => s + billableHours(a) * num(lookup(a && a.spec)), 0);
     return (totalBill - totalPay - totalBurden_) / totalHours;
