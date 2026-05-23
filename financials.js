@@ -124,24 +124,20 @@ window.ContractorFinancials = (() => {
 
   // ─── Net Margin (bill − pay − burden) ────────────────────────────────────
   // Burden is a per-BILLABLE-hour add-on cost beyond pay rate (taxes,
-  // insurance, admin overhead). Scaled by `direct` hours only — indirect
-  // hours aren't billed, so they don't carry a burden multiplier (this
-  // matches page-districts.jsx's rollup, which multiplies by cov.hoursPerWeek
-  // which is the billable-hours field). Looked up per-row by spec via the
-  // optional `burdenLookup(specCode)`; defaults to window.burdenFor when
-  // present, otherwise 0. Rows without a spec contribute zero burden so
-  // legacy data shows Net = Gross.
+  // insurance, admin overhead). Direct AND indirect hours are both billed
+  // at the same rate, so burden scales by total weekly hours — matching
+  // how revenue and pay scale. Looked up per-row by spec via the optional
+  // `burdenLookup(specCode)`; defaults to window.burdenFor when present,
+  // otherwise 0. Rows without a spec contribute zero burden so legacy
+  // data shows Net = Gross.
   function defaultBurden(specCode) {
     if (window.burdenFor) return num(window.burdenFor(specCode));
     return 0;
   }
-  function billableHours(a) {
-    return num(a && a.direct);
-  }
   function totalBurden(rows, burdenLookup) {
     const lookup = burdenLookup || defaultBurden;
     return activeRows(rows).reduce((sum, a) =>
-      sum + billableHours(a) * num(lookup(a && a.spec)), 0);
+      sum + weeklyHours(a) * num(lookup(a && a.spec)), 0);
   }
   function netMarginPerHour(rows, defaults, burdenLookup) {
     const lookup = burdenLookup || defaultBurden;
@@ -158,7 +154,7 @@ window.ContractorFinancials = (() => {
     }
     const totalBill   = active.reduce((s, a) => s + weeklyHours(a) * effectiveBill(a, defaults && defaults.bill, defaults && defaults.spec), 0);
     const totalPay    = active.reduce((s, a) => s + weeklyHours(a) * effectivePay(a,  defaults && defaults.pay),  0);
-    const totalBurden_ = active.reduce((s, a) => s + billableHours(a) * num(lookup(a && a.spec)), 0);
+    const totalBurden_ = active.reduce((s, a) => s + weeklyHours(a) * num(lookup(a && a.spec)), 0);
     return (totalBill - totalPay - totalBurden_) / totalHours;
   }
   function weeklyNetMargin(rows, defaults, burdenLookup) {

@@ -97,7 +97,7 @@
     const weeklyRev   = F ? F.weeklyRevenue([row], defaults) : (bill * weeklyHours);
     const weeklyPay   = F ? F.weeklyPay([row], defaults) : (pay * weeklyHours);
     const weeklyGross = F ? F.weeklyMargin([row], defaults) : (weeklyRev - weeklyPay);
-    const weeklyNet   = F ? F.weeklyNetMargin([row], defaults) : (weeklyGross - burden * direct);
+    const weeklyNet   = F ? F.weeklyNetMargin([row], defaults) : (weeklyGross - burden * weeklyHours);
     const annualGross = weeklyGross * WEEKS_PER_YEAR;
     const annualNet   = weeklyNet   * WEEKS_PER_YEAR;
     const grossPct = weeklyRev > 0 ? Math.round((weeklyGross / weeklyRev) * 100) : 0;
@@ -197,7 +197,7 @@
               paddingTop: 10, borderTop: `1px solid ${pal.borderSoft}`,
             }}>
               Burden for <b style={{ color: pal.textSoft, fontWeight: 600 }}>{draft.spec}</b>: <b style={{ color: pal.textSoft, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmt(burden, { cents: true })}/hr</b>.
-              Net subtracts burden × direct hours; indirect hours aren't billed and don't carry burden — same convention as the contractor and district margin views.
+              Direct and indirect hours are both billed at the same rate, so net subtracts burden × total weekly hours — same convention as the contractor and district margin views.
             </div>
           </div>
 
@@ -221,7 +221,7 @@
                 sub={`${weeklyHours}h × ${fmt(grossPerHr, { cents: true })}`} />
               <Stat pal={pal} label="Weekly net"
                 value={fmt(weeklyNet)} valueColor={netColor}
-                sub={`after ${fmt(burden * direct)} burden`} />
+                sub={`after ${fmt(burden * weeklyHours)} burden`} />
             </div>
             <div style={{
               display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12,
