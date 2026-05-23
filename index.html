@@ -77,6 +77,7 @@
   <script type="text/babel" src="page-contacts.jsx"></script>
   <script type="text/babel" src="page-renewals.jsx"></script>
   <script type="text/babel" src="page-admin.jsx"></script>
+  <script type="text/babel" src="page-financials.jsx"></script>
 
   <script type="text/babel">
     const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -145,6 +146,8 @@
         page = <SchedulePage dark={t.dark} />;
       } else if (route.name === 'renewals') {
         page = <RenewalsPage dark={t.dark} />;
+      } else if (route.name === 'financials') {
+        page = <FinancialsPage dark={t.dark} />;
       } else if (route.name === 'admin') {
         page = <AdminPage dark={t.dark} />;
       } else {

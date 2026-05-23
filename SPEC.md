@@ -46,14 +46,13 @@ from this file in that same commit.
 
 ### Financials page
 
-A new page — a margin calculator, a company-wide reporting rollup (earned
-revenue, gross/net margin, projections), and the Specialty settings section
-moved here from the Admin page. Fully scoped in
+The page exists at `/financials` with the margin calculator and the
+Specialty settings section (lifted from /admin). Remaining: the
+**reporting rollup** — company-wide earned revenue, gross/net margin, and
+projections, broken down by company total / district / specialty /
+contractor. Depends on a monthly time-entries CSV import from the time
+tracker; build after that import exists. Fully scoped in
 `docs/financials-page-scope.md`.
-
-- The **margin calculator** is self-contained and buildable now.
-- The **reporting rollup** depends on the bill rate model (above) and a monthly
-  time-entries CSV import from the time tracker — build it after both.
 
 ### After the real data migration
 

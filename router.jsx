@@ -36,6 +36,7 @@
     if (segs[0] === 'board')     return { name: 'board', segs };
     if (segs[0] === 'matchmaker') return { name: 'matchmaker', segs };
     if (segs[0] === 'renewals')  return { name: 'renewals', segs };
+    if (segs[0] === 'financials') return { name: 'financials', segs };
     if (segs[0] === 'admin')     return { name: 'admin', segs };
     return { name: 'home', segs: [] };
   }

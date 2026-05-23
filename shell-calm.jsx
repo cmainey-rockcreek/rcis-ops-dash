@@ -448,6 +448,7 @@
       { key: 'matchmaker',  icon: 'cal',    name: 'Matchmaker',   to: '/matchmaker' },
       { key: 'board',       icon: 'list',   name: 'Tasks',        to: '/board' },
       { key: 'renewals',    icon: 'file',   name: 'Renewals',     to: '/renewals',    badge: renewalsBadge },
+      { key: 'financials',  icon: 'file',   name: 'Financials',   to: '/financials' },
       { key: 'admin',       icon: 'settings', name: 'Admin',      to: '/admin' },
     ];
     return (
