@@ -14,6 +14,17 @@ Because there is no bundler, **script load order in `index.html` matters** — s
 
 The app is sized for ≥1440px; `#root` has `min-width: 1280px` and the page allows horizontal scroll rather than reflow below that.
 
+## Tracking work — SPEC.md
+
+`SPEC.md` is the forward-only plan: it lists only what is **not done yet** — upcoming work, open questions, and the parking lot. It is not a status archive. Git history is the record of what shipped.
+
+Two rules, every run:
+
+1. **When you finish an item, delete it from SPEC.md in the same commit that ships the work.** Not a separate commit, not a checkbox — remove the item. The commit that adds the feature is the commit that drops it from the plan, so the two cannot drift.
+2. **When you discover new work, add it to SPEC.md** under the relevant section instead of doing it silently or dropping it.
+
+At every phase or run boundary, reconcile: compare `git log` since the last boundary against SPEC.md and fix any mismatch before continuing.
+
 ## Architecture
 
 ### Module system: globals on `window`
