@@ -22,8 +22,10 @@ create index if not exists todos_column_idx     on public.todos (column_name);
 create index if not exists todos_updated_at_idx on public.todos (updated_at desc);
 
 -- ─── team_profiles ────────────────────────────────────────────────────────
--- One public profile per Supabase Auth user. Auth users themselves live in the
--- private auth schema, so the app reads this smaller team-safe profile table.
+-- One public profile per Supabase Auth user, plus optional "pending" rows
+-- pre-added from the Admin page before the teammate signs up (id null,
+-- invited=true). On first sign-up the handle_new_auth_user trigger below
+-- claims the pending row by email, attaching the auth uid.
 create table if not exists public.team_profiles (
   id            uuid primary key references auth.users(id) on delete cascade,
   email         text not null unique,
@@ -36,6 +38,31 @@ create table if not exists public.team_profiles (
   updated_at    timestamptz not null default now()
 );
 create index if not exists team_profiles_active_idx on public.team_profiles (active, full_name);
+
+-- Pending-invite support (idempotent migration of the above table).
+-- Pending rows have no auth user yet, so id must be nullable. We:
+--   1. add a plain UNIQUE constraint on id (UNIQUE allows multiple NULLs
+--      in Postgres, and FKs from other tables can target it instead of
+--      the PK we're about to drop);
+--   2. drop the PK on id;
+--   3. make id nullable;
+--   4. add the invited flag.
+-- The FK to auth.users(id) on delete cascade is a separate constraint
+-- and is preserved. Email stays globally unique — it's the anchor the
+-- sign-up trigger uses to claim the pending row.
+-- On a first run the PK already covers id uniqueness; this UNIQUE
+-- constraint is redundant there but harmless. On a re-run after the PK
+-- has been dropped, the UNIQUE here is what FK targets resolve to.
+do $$ begin
+  alter table public.team_profiles add constraint team_profiles_id_key unique (id);
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter table public.team_profiles drop constraint team_profiles_pkey;
+exception when undefined_object then null;
+end $$;
+alter table public.team_profiles alter column id drop not null;
+alter table public.team_profiles add column if not exists invited boolean not null default false;
 
 -- ─── coverage_gaps ───────────────────────────────────────────────────────
 -- Tracked needs (school-tied or district-wide). Drive the home page widget
@@ -471,9 +498,38 @@ create or replace function public.handle_new_auth_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
   display_name text;
+  claimed_count int;
 begin
   display_name := nullif(trim(coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', '')), '');
 
+  -- If an admin pre-added this teammate, claim that pending row by email
+  -- (case-insensitive). Attach the new auth uid, clear the invited flag,
+  -- and only fill in name / initials / color if they were left blank.
+  -- Preserves whatever the admin already typed.
+  update public.team_profiles
+    set id = new.id,
+        invited = false,
+        email = coalesce(new.email, email),
+        full_name = case when nullif(full_name, '') is null
+                      then coalesce(display_name, split_part(coalesce(new.email, ''), '@', 1))
+                      else full_name end,
+        initials = case when nullif(initials, '') is null
+                      then public.profile_initials(display_name, new.email)
+                      else initials end,
+        color = case when nullif(color, '') is null
+                      then public.profile_color(new.id)
+                      else color end,
+        updated_at = now()
+    where invited = true
+      and id is null
+      and lower(email) = lower(coalesce(new.email, ''));
+
+  get diagnostics claimed_count = row_count;
+  if claimed_count > 0 then
+    return new;
+  end if;
+
+  -- No pending row → original insert path.
   insert into public.team_profiles (id, email, full_name, initials, color)
   values (
     new.id,
@@ -615,6 +671,24 @@ drop policy if exists "users can update own team profile" on public.team_profile
 drop policy if exists "team can update team profiles" on public.team_profiles;
 create policy "team can update team profiles" on public.team_profiles
   for update to authenticated using (true) with check (true);
+
+-- Pre-add ("invite") a teammate from the Admin page: creates a pending
+-- row with no auth uid yet. Restricted to rows that are clearly pending
+-- (id is null, invited = true) so this policy can't be abused to insert
+-- a row claiming someone else's auth uid — that's still gated by the
+-- "users can create own team profile" policy above.
+drop policy if exists "team can invite teammates" on public.team_profiles;
+create policy "team can invite teammates" on public.team_profiles
+  for insert to authenticated
+  with check (id is null and invited = true);
+
+-- Cancel a pending invite from the Admin page. Restricted to pending
+-- rows only — claimed profiles can't be deleted through the app (auth
+-- account deletion cascades from auth.users).
+drop policy if exists "team can cancel pending invites" on public.team_profiles;
+create policy "team can cancel pending invites" on public.team_profiles
+  for delete to authenticated
+  using (id is null and invited = true);
 
 drop policy if exists "team full access" on public.contacts;
 create policy "team full access" on public.contacts

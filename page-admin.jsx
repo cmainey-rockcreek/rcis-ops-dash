@@ -40,14 +40,20 @@
 
   function TeamMembersSection({ pal }) {
     const profiles = window.useAdminProfiles ? window.useAdminProfiles() : [];
+    // Sort: active claimed, then pending invites, then deactivated. The
+    // pending tier sits between so a fresh invite stays visible without
+    // disappearing into the "inactive" bottom.
     const sorted = React.useMemo(() => {
+      const tier = (p) => p.invited ? 1 : (p.active ? 0 : 2);
       return [...profiles].sort((a, b) => {
-        if (a.active !== b.active) return a.active ? -1 : 1;
+        const ta = tier(a), tb = tier(b);
+        if (ta !== tb) return ta - tb;
         return (a.name || '').localeCompare(b.name || '');
       });
     }, [profiles]);
 
-    const activeCount = sorted.filter((p) => p.active).length;
+    const activeCount  = sorted.filter((p) => p.active && !p.invited).length;
+    const pendingCount = sorted.filter((p) => p.invited).length;
 
     return (
       <div style={{
@@ -66,9 +72,11 @@
             fontSize: 11, fontWeight: 600, color: pal.textSoft,
             background: pal.chipBg, padding: '1px 7px', borderRadius: 10,
             fontVariantNumeric: 'tabular-nums',
-          }}>{activeCount} active · {sorted.length} total</span>
+          }}>
+            {activeCount} active{pendingCount > 0 ? ` · ${pendingCount} pending` : ''} · {sorted.length} total
+          </span>
           <span style={{ marginLeft: 'auto', fontSize: 11.5, color: pal.textFaint }}>
-            New teammates appear here after their first sign-in.
+            Pre-add invites below; they link to the auth account on first sign-in.
           </span>
         </div>
 
@@ -88,22 +96,123 @@
           <span>Role</span>
           <span>Initials</span>
           <span>Color</span>
-          <span style={{ textAlign: 'right' }}>Active</span>
+          <span style={{ textAlign: 'right' }}>Status</span>
         </div>
 
         {sorted.length === 0 ? (
           <div style={{ padding: '32px 16px', textAlign: 'center', color: pal.textFaint, fontSize: 13 }}>
-            No team profiles yet — sign in to populate this list.
+            No team profiles yet — sign in or pre-add a teammate below.
           </div>
         ) : (
-          sorted.map((p) => <TeamRow key={p.id} p={p} pal={pal} />)
+          sorted.map((p) => <TeamRow key={p.id || ('pending:' + p.email)} p={p} pal={pal} />)
         )}
+
+        <InviteForm pal={pal} />
       </div>
     );
   }
 
+  // Pre-add form: name, email, role. Creates a pending team_profiles row;
+  // the Postgres handle_new_auth_user trigger will claim it (attach the
+  // auth uid, clear the invited flag) the first time the teammate signs
+  // up with that email. No system-sent email — share the dashboard URL
+  // with them out of band.
+  function InviteForm({ pal }) {
+    const [draft, setDraft] = React.useState({ name: '', email: '', role: 'Team' });
+    const [busy, setBusy]   = React.useState(false);
+    const [error, setError] = React.useState(null);
+    const [okFlash, setOkFlash] = React.useState(null);
+
+    const set = (patch) => setDraft((d) => ({ ...d, ...patch }));
+    const reset = () => setDraft({ name: '', email: '', role: 'Team' });
+
+    const canSubmit = !busy
+      && draft.email.trim().length > 2
+      && draft.email.includes('@');
+
+    const submit = async (e) => {
+      if (e && e.preventDefault) e.preventDefault();
+      if (!canSubmit) return;
+      setBusy(true); setError(null);
+      const res = await window.TeamStore.invite(draft);
+      setBusy(false);
+      if (res && res.error) { setError(res.error); return; }
+      setOkFlash(`Invited ${draft.email.trim()}.`);
+      reset();
+      setTimeout(() => setOkFlash(null), 3500);
+    };
+
+    const inputStyle = {
+      padding: '6px 10px', fontSize: 12.5,
+      color: pal.text, background: pal.cardAlt,
+      border: `1px solid ${pal.border}`, borderRadius: 6,
+      outline: 'none', fontFamily: 'inherit',
+      width: '100%',
+    };
+    const labelStyle = {
+      fontSize: 10, fontWeight: 700, letterSpacing: 0.6,
+      color: pal.textFaint, textTransform: 'uppercase', marginBottom: 4,
+    };
+
+    return (
+      <form onSubmit={submit} style={{
+        padding: '14px 16px',
+        background: pal.cardAlt,
+        borderTop: `1px solid ${pal.border}`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <h4 style={{ margin: 0, fontSize: 12, fontWeight: 600, color: pal.text }}>
+            Pre-add teammate
+          </h4>
+          <span style={{ fontSize: 11, color: pal.textFaint }}>
+            They'll link to this profile when they sign up with this email.
+          </span>
+        </div>
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1.4fr 1.6fr 1fr 100px',
+          gap: 10, alignItems: 'end',
+        }}>
+          <div>
+            <div style={labelStyle}>Name</div>
+            <input value={draft.name} placeholder="First Last" style={inputStyle}
+              onChange={(e) => set({ name: e.target.value })} />
+          </div>
+          <div>
+            <div style={labelStyle}>Email *</div>
+            <input type="email" value={draft.email} placeholder="teammate@rcis.example"
+              required style={inputStyle}
+              onChange={(e) => set({ email: e.target.value })} />
+          </div>
+          <div>
+            <div style={labelStyle}>Role</div>
+            <input value={draft.role} placeholder="Team" style={inputStyle}
+              onChange={(e) => set({ role: e.target.value })} />
+          </div>
+          <button type="submit" disabled={!canSubmit} style={{
+            padding: '7px 12px', fontSize: 12.5, fontWeight: 600,
+            background: canSubmit ? pal.accent : pal.chipBg,
+            color: canSubmit ? '#fff' : pal.textFaint,
+            border: 'none', borderRadius: 6,
+            cursor: canSubmit ? 'pointer' : 'default',
+            fontFamily: 'inherit',
+          }}>{busy ? 'Inviting…' : 'Pre-add'}</button>
+        </div>
+        {error && (
+          <div style={{ marginTop: 8, fontSize: 11.5, color: pal.warn }}>{error}</div>
+        )}
+        {okFlash && (
+          <div style={{ marginTop: 8, fontSize: 11.5, color: pal.accent }}>{okFlash}</div>
+        )}
+      </form>
+    );
+  }
+
   function TeamRow({ p, pal }) {
-    const save = (patch) => window.TeamStore.updateProfile(p.id, patch);
+    // Claimed rows update by id; pending rows (no auth uid yet) update
+    // by email. Same patch shape — the store fans out internally.
+    const save = (patch) => p.invited
+      ? window.TeamStore.updatePendingProfile(p.email, patch)
+      : window.TeamStore.updateProfile(p.id, patch);
     return (
       <div style={{
         display: 'grid',
@@ -137,10 +246,58 @@
 
         <ColorPicker pal={pal} value={p.color} onSave={(v) => save({ color: v })} />
 
-        <ActiveToggle pal={pal} active={p.active}
-          onChange={(v) => save({ active: v })} />
+        {p.invited
+          ? <PendingStatus pal={pal} email={p.email} />
+          : <ActiveToggle pal={pal} active={p.active}
+              onChange={(v) => save({ active: v })} />}
       </div>
     );
+  }
+
+  // Status cell for a pending invite: a "Pending" pill plus a Cancel
+  // affordance that deletes the pre-added row. Replaces the Active toggle
+  // until the teammate signs up and the row gets claimed.
+  function PendingStatus({ pal, email }) {
+    const [confirming, setConfirming] = React.useState(false);
+    const cancel = () => {
+      window.TeamStore.cancelInvite(email);
+      setConfirming(false);
+    };
+    return (
+      <span style={{
+        marginLeft: 'auto',
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        whiteSpace: 'nowrap',
+      }}>
+        <span title="Awaiting first sign-up with this email"
+          style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
+            color: '#C98A2C', background: '#C98A2C22',
+            padding: '2px 7px', borderRadius: 10,
+            textTransform: 'uppercase',
+          }}>Pending</span>
+        {confirming ? (
+          <span style={{ display: 'inline-flex', gap: 4 }}>
+            <button onClick={cancel} title="Confirm cancel"
+              style={pendingActionBtn(pal, true)}>Cancel</button>
+            <button onClick={() => setConfirming(false)} title="Keep invite"
+              style={pendingActionBtn(pal, false)}>Keep</button>
+          </span>
+        ) : (
+          <button onClick={() => setConfirming(true)} title="Cancel invite"
+            style={pendingActionBtn(pal, false)}>×</button>
+        )}
+      </span>
+    );
+  }
+  function pendingActionBtn(pal, danger) {
+    return {
+      padding: '2px 7px', fontSize: 10.5, fontWeight: 600,
+      color: danger ? '#C04E40' : pal.textFaint,
+      background: 'transparent',
+      border: `1px solid ${danger ? '#C04E40' : pal.border}`,
+      borderRadius: 5, cursor: 'pointer', fontFamily: 'inherit',
+    };
   }
 
   function EditableCell({ pal, value, placeholder, onSave, requireNonEmpty, monospace, maxLen }) {

@@ -35,10 +35,6 @@ from this file in that same commit.
 
 ### Prototype work — do first
 
-- **Invite users from the Admin page (lightweight).** Pre-add a teammate
-  (name, email, role) as a pending profile; they self-sign-up with that email
-  and get linked to the profile. No backend, no system-sent email. The full
-  invite flow and closed signup are parked (see Parking lot).
 - **Multi-user + onboarding test pass.** With a second account, verify the
   sign-up trigger and team list, realtime sync across users, per-user comment
   permissions, the new user's avatar/initials/color, and the first-run

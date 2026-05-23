@@ -42,17 +42,20 @@
       initials: row.initials || initialsFor(name, row.email),
       color: row.color || colorFor(row.id || row.email),
       active: row.active !== false,
+      invited: row.invited === true,
       source: 'live',
     };
   }
 
   function allMembers() {
-    const byId = new Map();
-    profiles.forEach((m) => byId.set(m.id, m));
+    // Pending invites have id=null until the teammate signs up, so dedup
+    // keys fall back to email for those rows.
+    const byKey = new Map();
+    profiles.forEach((m) => byKey.set(m.id || ('pending:' + m.email), m));
     FALLBACK_TEAM.forEach((m) => {
-      if (!byId.has(m.id)) byId.set(m.id, m);
+      if (!byKey.has(m.id)) byKey.set(m.id, m);
     });
-    return Array.from(byId.values());
+    return Array.from(byKey.values());
   }
 
   function assignableMembers() {
@@ -60,8 +63,10 @@
     // from Supabase. If profiles loaded but every row is inactive (an
     // admin has deactivated everyone), return an empty list rather than
     // surfacing mock IDs that would fail the team_profiles FK on insert.
+    // Pending invites are excluded — they have no auth uid yet, so they
+    // can't own a todo or comment.
     if (!profiles.length) return FALLBACK_TEAM;
-    return profiles.filter((p) => p.active);
+    return profiles.filter((p) => p.active && !p.invited);
   }
 
   // All persisted profiles regardless of `active` — admin page edits this.
@@ -91,7 +96,7 @@
     }
     const { data, error } = await window.sb
       .from('team_profiles')
-      .select('id,email,full_name,role,initials,color,active')
+      .select('id,email,full_name,role,initials,color,active,invited')
       .order('full_name', { ascending: true });
 
     if (error) {
@@ -169,6 +174,9 @@
 
   // Optimistic patch on a profile row (name, role, initials, color, active).
   // Lets the admin page do inline edits without re-fetching after each save.
+  // Pending rows (id null) update via updatePendingProfile below — the
+  // admin UI uses that path so name/role/initials/color edits work before
+  // the teammate has signed up.
   async function updateProfile(id, patch) {
     if (!id || !window.sb) return;
     const fields = {};
@@ -189,6 +197,80 @@
     }
   }
 
+  // Pending rows have no id yet; edits key off email. Same shape as
+  // updateProfile so the Admin page can use a single save handler.
+  async function updatePendingProfile(email, patch) {
+    if (!email || !window.sb) return;
+    const fields = {};
+    if (patch.name != null)     fields.full_name = patch.name;
+    if (patch.role != null)     fields.role     = patch.role;
+    if (patch.initials != null) fields.initials = patch.initials;
+    if (patch.color != null)    fields.color    = patch.color;
+    if (patch.active != null)   fields.active   = !!patch.active;
+    if (Object.keys(fields).length === 0) return;
+
+    profiles = profiles.map((p) =>
+      (p.invited && p.email === email) ? { ...p, ...patch } : p);
+    publish();
+
+    const { error } = await window.sb.from('team_profiles')
+      .update(fields).eq('email', email).eq('invited', true);
+    if (error) {
+      console.warn('team_profiles.update pending', error.message || error);
+      load();
+    }
+  }
+
+  // Pre-add a teammate from the Admin page. Creates a pending row with
+  // no auth uid; the handle_new_auth_user trigger will claim it by email
+  // when the person signs up. Returns { error } on validation or DB
+  // failure so the caller can surface a message.
+  async function invite({ name, email, role }) {
+    if (!window.sb) return { error: 'Offline.' };
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) return { error: 'Email looks invalid.' };
+    // Duplicate guard — email is unique; surface a friendly message
+    // rather than a Postgres error.
+    if (profiles.some((p) => (p.email || '').toLowerCase() === cleanEmail)) {
+      return { error: 'A teammate with that email already exists.' };
+    }
+    const cleanName_ = cleanName(name) || nameFromEmail(cleanEmail);
+    const row = {
+      email: cleanEmail,
+      full_name: cleanName_,
+      role: (role || 'Team').trim() || 'Team',
+      initials: initialsFor(cleanName_, cleanEmail),
+      color: colorFor(cleanEmail),
+      active: true,
+      invited: true,
+    };
+    const { error } = await window.sb.from('team_profiles').insert(row);
+    if (error) {
+      console.warn('team_profiles.invite', error.message || error);
+      return { error: error.message || String(error) };
+    }
+    // Realtime push will refresh the list; force a reload for the
+    // current session in case the realtime channel is slow to fire.
+    await load();
+    return { ok: true };
+  }
+
+  // Cancel a pending invite (delete the row). Permitted by RLS only for
+  // pending rows (id null, invited true) — claimed profiles can't be
+  // deleted through the app.
+  async function cancelInvite(email) {
+    if (!email || !window.sb) return;
+    const cleanEmail = String(email).trim().toLowerCase();
+    profiles = profiles.filter((p) => !(p.invited && (p.email || '').toLowerCase() === cleanEmail));
+    publish();
+    const { error } = await window.sb.from('team_profiles')
+      .delete().eq('email', cleanEmail).eq('invited', true);
+    if (error) {
+      console.warn('team_profiles.cancelInvite', error.message || error);
+      load();
+    }
+  }
+
   window.TeamStore = {
     all: allMembers,
     assignable: assignableMembers,
@@ -197,6 +279,9 @@
     reload: load,
     ensureCurrentProfile,
     updateProfile,
+    updatePendingProfile,
+    invite,
+    cancelInvite,
   };
   window.useTeam = () => useMembers('assignable');
   window.useAllTeam = () => useMembers('all');
