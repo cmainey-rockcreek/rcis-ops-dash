@@ -35,12 +35,6 @@ from this file in that same commit.
 
 ### Prototype work — do first
 
-- **Fix stale capacity / free-hours.** Matchmaker and the contractors list
-  compute booked hours from a static `assigned` field that is zero for any
-  contractor created in the app and never updates when assignments change — so
-  a contractor who is over capacity can show as fully free in Matchmaker.
-  Compute booked hours live from assignments everywhere; the contractor detail
-  page already does this, so reuse that pattern. (Correctness.)
 - **Bill rate model.** Bill rate is set per (district × specialty), not per
   contractor. Add a district rate card (specialty → rate); each assignment
   derives its bill rate from its district plus the contractor's specialty.

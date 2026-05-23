@@ -48,6 +48,19 @@
     const enriched = window.useContractorsView
       ? window.useContractorsView(liveCatalog)
       : liveCatalog;
+    // Live booked hours per contractor — replaces the stale c.assigned
+    // snapshot so user-created contractors and over-cap contractors render
+    // their real load.
+    const persistedAssignments = window.useAssignments ? window.useAssignments() : [];
+    const bookedById = React.useMemo(() => {
+      const out = new Map();
+      for (const c of enriched) {
+        out.set(c.id, window.bookedHoursFor
+          ? window.bookedHoursFor(c, persistedAssignments)
+          : (Number(c.assigned) || 0));
+      }
+      return out;
+    }, [enriched, persistedAssignments]);
 
     const sortedFiltered = React.useMemo(() => {
       const q = query.trim().toLowerCase();
@@ -68,7 +81,7 @@
         name:   (c) => c.name,
         spec:   (c) => c.spec,
         states: (c) => c.states.join(','),
-        load:   (c) => c.assigned / Math.max(1, c.cap),
+        load:   (c) => (bookedById.get(c.id) || 0) / Math.max(1, c.cap),
         status: (c) => c.status,
       }[sort.key] || ((c) => c.name);
       rows = [...rows].sort((a, b) => {
@@ -78,7 +91,7 @@
         return 0;
       });
       return rows;
-    }, [enriched, query, statusFilter, specFilter, openTodosOnly, sort, idsWithOpenTodos]);
+    }, [enriched, query, statusFilter, specFilter, openTodosOnly, sort, idsWithOpenTodos, bookedById]);
 
     const STATUS_OPTS = [
       { key: 'all',     label: 'All',       color: pal.textSoft },
@@ -199,7 +212,7 @@
               }}>No contractors match your filters.</div>
             ) : (
               sortedFiltered.map((c) => (
-                <ContractorRow key={c.id} c={c} pal={pal} />
+                <ContractorRow key={c.id} c={c} pal={pal} booked={bookedById.get(c.id) || 0} />
               ))
             )}
           </div>
@@ -420,8 +433,11 @@
     );
   }
 
-  function ContractorRow({ c, pal }) {
-    const free = c.cap - c.assigned;
+  function ContractorRow({ c, pal, booked }) {
+    const cap = Number(c.cap) || 0;
+    const bookedNum = Number.isFinite(booked) ? booked : (Number(c.assigned) || 0);
+    const free = Math.max(0, cap - bookedNum);
+    const over = bookedNum > cap ? (bookedNum - cap) : 0;
     const initials = c.name.split(' ').map((p) => p[0]).join('').slice(0, 2);
     return (
       <window.Link to={`/contractors/${c.id}`} style={{
@@ -457,11 +473,13 @@
         </div>
 
         <div>
-          <CapacityBar assigned={c.assigned} cap={c.cap} track={pal.chipBg} fill={pal.accent} />
+          <CapacityBar assigned={bookedNum} cap={cap} track={pal.chipBg} fill={pal.accent} />
           <div style={{ fontSize: 10, color: pal.textFaint, marginTop: 3,
             fontVariantNumeric: 'tabular-nums', display: 'flex', justifyContent: 'space-between' }}>
-            <span>{c.assigned}/{c.cap}h</span>
-            {free > 0 && <span style={{ color: pal.accent, fontWeight: 600 }}>+{free}h free</span>}
+            <span>{bookedNum}/{cap}h</span>
+            {over > 0
+              ? <span style={{ color: pal.warn, fontWeight: 600 }}>over by {over}h</span>
+              : free > 0 && <span style={{ color: pal.accent, fontWeight: 600 }}>+{free}h free</span>}
           </div>
         </div>
 
@@ -634,6 +652,12 @@
     const marginHr    = F.marginPerHour ? F.marginPerHour(assignments, defaults)  : 0;
     const netMarginHr = F.netMarginPerHour ? F.netMarginPerHour(assignments, defaults) : marginHr;
     const fmt         = F.formatUSD || ((n) => `$${(n || 0).toLocaleString()}`);
+    // Live booked hours from active mock + persisted rows — replaces the
+    // stale c.assigned mock snapshot so the Load KPI matches the
+    // CapacityCard below and the contractors-list capacity bar.
+    const booked = F.activeRows && F.weeklyHours
+      ? F.activeRows(assignments).reduce((s, a) => s + F.weeklyHours(a), 0)
+      : (Number(c.assigned) || 0);
     return (
       <div style={{ padding: '14px 24px 4px', display: 'flex', alignItems: 'flex-start', gap: 18 }}>
         <span style={{
@@ -681,7 +705,7 @@
             <EditableRateKpi pal={pal} label="Bill Rate"
               value={c.rates.bill}
               onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { billRate: v })} />
-            <Kpi pal={pal} label="Load"     value={`${c.assigned}h`}     sub={`of ${c.cap}h`} />
+            <Kpi pal={pal} label="Load"     value={`${booked}h`}     sub={`of ${c.cap}h`} />
             <Kpi pal={pal} label="Revenue"     value={fmt(annualRev)} sub="/year"
                  valueColor={pal.accent} />
             <Kpi pal={pal} label="Gross Margin" value={fmt(marginHr, { cents: true })} sub="/hour"
@@ -948,9 +972,11 @@
     );
   }
 
-  // Capacity summary — sums merged assignments (mock + persisted) so adding a
-  // new assignment via "+ Add assignment" immediately updates direct/indirect
-  // totals and the capacity bar.
+  // Capacity summary — sums merged active assignments (mock + persisted) so
+  // adding a new assignment via "+ Add assignment" immediately updates the
+  // direct/indirect totals and the capacity bar. Booked hours is the sum
+  // across both sources (no longer adds c.assigned — that's the stale mock
+  // snapshot, and persisted rows would double-count otherwise).
   function CapacityCard({ c, pal }) {
     const all = window.useContractorAssignments
       ? window.useContractorAssignments(c)
@@ -959,12 +985,7 @@
     const directTotal   = activeRows.reduce((s, a) => s + (Number(a.direct)   || 0), 0);
     const indirectTotal = activeRows.reduce((s, a) => s + (Number(a.indirect) || 0), 0);
     const schoolsCount  = new Set(activeRows.map((a) => a.schoolId || a.school || a.districtId || '')).size;
-    // Effective booked hours: mock c.assigned PLUS any added assignment hours
-    // from Supabase. (Mock assignments are already reflected in c.assigned.)
-    const addedHours = activeRows
-      .filter((a) => a.source === 'supabase')
-      .reduce((s, a) => s + (Number(a.direct) || 0) + (Number(a.indirect) || 0), 0);
-    const booked = (c.assigned || 0) + addedHours;
+    const booked = directTotal + indirectTotal;
     const pct = c.cap > 0 ? Math.round((booked / c.cap) * 100) : 0;
     return (
       <Section pal={pal} title="Capacity this week">

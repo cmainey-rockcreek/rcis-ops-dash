@@ -302,30 +302,12 @@
     const SPECIALTIES = (window.RCIS_DATA && window.RCIS_DATA.SPECIALTIES) || [];
     const [specFilter, setSpecFilter] = React.useState('all');
 
-    // Compute booked hours per contractor: sum mock + real active rows,
-    // applying the per-spec indirect ratio so the math agrees with the
-    // contractor profile's useContractorAssignments.
+    // Booked hours come from the shared bookedHoursFor helper so this
+    // widget, the contractor profile, the contractors list, and the
+    // Matchmaker all agree on what each contractor is currently carrying.
     const rows = React.useMemo(() => {
       return enriched.map((c) => {
-        let booked = 0;
-        for (const m of (c.assignments || [])) {
-          if ((m.status || 'active') !== 'active') continue;
-          const direct = Number(m.direct) || 0;
-          const indirect = Number(m.indirect) || 0;
-          const fallback = Number(m.hoursPerWeek) || 0;
-          booked += direct || indirect ? direct + indirect : fallback;
-        }
-        for (const a of persisted) {
-          if (a.contractorId !== c.id) continue;
-          if ((a.status || 'active') !== 'active') continue;
-          const direct = Number(a.directHours) || 0;
-          const indirect = a.indirectOverride
-            ? (Number(a.indirectHours) || 0)
-            : (window.AssignmentsStore && window.AssignmentsStore.autoIndirect
-                ? window.AssignmentsStore.autoIndirect(direct, a.spec || c.spec)
-                : 0);
-          booked += direct + indirect;
-        }
+        const booked = window.bookedHoursFor ? window.bookedHoursFor(c, persisted) : 0;
         const cap = Number(c.cap) || 0;
         const free = Math.max(0, cap - booked);
         return { c, booked, cap, free };

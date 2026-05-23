@@ -95,8 +95,13 @@
     'Charleston, WV':   [38.349, -81.633],
   };
 
-  function freeHours(c) {
-    return Math.max(0, (c.cap || 0) - (c.assigned || 0));
+  // Booked hours come from active mock + persisted assignments via the
+  // shared bookedHoursFor helper — c.assigned is a static mock snapshot
+  // and is always 0 for contractors created in the app.
+  function freeHours(c, persisted) {
+    const cap = Number(c && c.cap) || 0;
+    const booked = window.bookedHoursFor ? window.bookedHoursFor(c, persisted) : 0;
+    return Math.max(0, cap - booked);
   }
   function daysPosted(g) {
     if (!g) return 0;
@@ -201,8 +206,8 @@
     });
   }
 
-  function rankContractorForGap(c, gap, fit) {
-    const free = freeHours(c);
+  function rankContractorForGap(c, gap, fit, persisted) {
+    const free = freeHours(c, persisted);
     let score = 0;
     if (free >= gap.hours) score += 1000;
     score += free * 10;
@@ -214,8 +219,8 @@
     }
     return score;
   }
-  function rankGapForContractor(g, contractor, fit) {
-    const free = freeHours(contractor);
+  function rankGapForContractor(g, contractor, fit, persisted) {
+    const free = freeHours(contractor, persisted);
     let score = 0;
     const pri = { urgent: 100, high: 70, medium: 40, low: 10 };
     score += pri[g.priority] || 0;
@@ -260,6 +265,9 @@
     const contractors = window.useContractorsView
       ? window.useContractorsView(liveCatalog)
       : liveCatalog;
+    // Subscribe to persisted assignments so the freeHours-driven rank and
+    // shortlist re-derive when a teammate adds/edits an assignment.
+    const persistedAssignments = window.useAssignments ? window.useAssignments() : [];
 
     const [selectedGapId, setSelectedGapId] = React.useState(null);
     const [selectedContractorId, setSelectedContractorId] = React.useState(null);
@@ -365,8 +373,8 @@
       [gaps, rateOverrides],
     );
     const totalAvailableHours = React.useMemo(
-      () => contractors.reduce((sum, c) => sum + freeHours(c), 0),
-      [contractors],
+      () => contractors.reduce((sum, c) => sum + freeHours(c, persistedAssignments), 0),
+      [contractors, persistedAssignments],
     );
 
     const rankedContractors = React.useMemo(() => {
@@ -374,25 +382,25 @@
       return eligibleContractors(selectedGap, contractors)
         .map((c) => {
           const fit = modalityFit(c, selectedGap);
-          return { c, fit, score: rankContractorForGap(c, selectedGap, fit) };
+          return { c, fit, score: rankContractorForGap(c, selectedGap, fit, persistedAssignments) };
         })
         .sort((a, b) => b.score - a.score)
         .slice(0, TOP_N);
-    }, [selectedGap, contractors]);
+    }, [selectedGap, contractors, persistedAssignments]);
 
     const rankedGaps = React.useMemo(() => {
       if (!selectedContractor) return null;
       return eligibleGaps(selectedContractor, gaps)
         .map((g) => {
           const fit = modalityFit(selectedContractor, g);
-          return { g, fit, score: rankGapForContractor(g, selectedContractor, fit) };
+          return { g, fit, score: rankGapForContractor(g, selectedContractor, fit, persistedAssignments) };
         })
         .sort((a, b) => b.score - a.score)
         .slice(0, TOP_N);
-    }, [selectedContractor, gaps]);
+    }, [selectedContractor, gaps, persistedAssignments]);
 
     const openTaskDraftFor = (gap, contractor) => {
-      const free = freeHours(contractor);
+      const free = freeHours(contractor, persistedAssignments);
       const fit = modalityFit(contractor, gap);
       const fitText = fit.modality === 'onsite' && Number.isFinite(fit.miles)
         ? `onsite (${Math.round(fit.miles)} mi from ${contractor.city || 'their base'})`
@@ -488,6 +496,7 @@
           <ContractorsPanel
             pal={pal}
             contractors={contractors}
+            persistedAssignments={persistedAssignments}
             ranked={rankedContractors}
             selectedContractorId={selectedContractorId}
             selectedGap={selectedGap}
@@ -612,10 +621,10 @@
     );
   }
 
-  function ContractorsPanel({ pal, contractors, ranked, selectedContractorId, selectedGap, gapRate, onSelectContractor, onCreateTask, isShortlisted, onShortlist }) {
+  function ContractorsPanel({ pal, contractors, persistedAssignments, ranked, selectedContractorId, selectedGap, gapRate, onSelectContractor, onCreateTask, isShortlisted, onShortlist }) {
     const items = ranked ? ranked : contractors.map((c) => ({ c, fit: null }));
     const isRanked = !!ranked;
-    const totalFree = items.reduce((sum, x) => sum + freeHours(x.c), 0);
+    const totalFree = items.reduce((sum, x) => sum + freeHours(x.c, persistedAssignments), 0);
     return (
       <Panel pal={pal} title={isRanked ? `Best contractors for ${selectedGap.school}` : 'Contractors'}
              subtitle={(isRanked
@@ -630,6 +639,7 @@
                 key={c.id}
                 pal={pal}
                 contractor={c}
+                free={freeHours(c, persistedAssignments)}
                 fit={fit}
                 gapRate={isRanked ? gapRate : null}
                 neededHours={isRanked ? selectedGap.hours : null}
@@ -821,8 +831,11 @@
     );
   }
 
-  function ContractorRow({ pal, contractor, fit, gapRate, neededHours, selected, rankAction, shortlisted, onShortlist, onClick }) {
-    const free = freeHours(contractor);
+  function ContractorRow({ pal, contractor, free: freeProp, fit, gapRate, neededHours, selected, rankAction, shortlisted, onShortlist, onClick }) {
+    // Prefer caller-computed free hours (parent passes the live value derived
+    // from persisted assignments); fall back to a cap-only read when called
+    // without it (e.g. legacy callers).
+    const free = Number.isFinite(freeProp) ? freeProp : Math.max(0, (contractor.cap || 0));
     const statusColors = STATUS_COLOR(pal);
     const sColor = statusColors[contractor.status] || pal.textFaint;
     const covers = neededHours == null ? null : (free >= neededHours);

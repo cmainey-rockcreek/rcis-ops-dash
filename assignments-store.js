@@ -285,3 +285,39 @@ window.useContractorAssignments = function useContractorAssignments(c) {
     return [...real, ...mock];
   }, [c, persisted, specSettings]);
 };
+
+// Live "booked hours this week" for a contractor: sums active mock + active
+// persisted assignments, applying the per-spec auto-indirect ratio to
+// persisted rows unless they carry an explicit override. The contractor
+// detail page's CapacityCard, the home CapacityNow widget, the Matchmaker
+// free-hours rank, and the contractors-list capacity bars all use this so
+// the numbers agree everywhere — and so a user-created contractor (whose
+// mock `c.assigned` snapshot is 0) reflects real assignments instead of
+// always looking fully free.
+//
+// Pass the persisted-assignments array in (don't subscribe inside) so React
+// callers can drive their own re-render via useAssignments().
+window.bookedHoursFor = function bookedHoursFor(c, persistedAssignments) {
+  if (!c) return 0;
+  let booked = 0;
+  for (const m of (c.assignments || [])) {
+    if ((m && m.status || 'active') !== 'active') continue;
+    const direct = Number(m && m.direct) || 0;
+    const indirect = Number(m && m.indirect) || 0;
+    const fallback = Number(m && m.hoursPerWeek) || 0;
+    booked += (direct || indirect) ? (direct + indirect) : fallback;
+  }
+  const persisted = Array.isArray(persistedAssignments) ? persistedAssignments : [];
+  for (const a of persisted) {
+    if (a.contractorId !== c.id) continue;
+    if ((a.status || 'active') !== 'active') continue;
+    const direct = Number(a.directHours) || 0;
+    const indirect = a.indirectOverride
+      ? (Number(a.indirectHours) || 0)
+      : (window.AssignmentsStore && window.AssignmentsStore.autoIndirect
+          ? window.AssignmentsStore.autoIndirect(direct, a.spec || c.spec)
+          : 0);
+    booked += direct + indirect;
+  }
+  return booked;
+};
