@@ -813,6 +813,14 @@ end $$;
 alter table public.team_profiles alter column id drop not null;
 alter table public.team_profiles add column if not exists invited boolean not null default false;
 
+-- Dropping the PK left the table without a replica identity, which
+-- breaks UPDATEs while the table is in supabase_realtime — and the
+-- handle_new_auth_user trigger UPDATEs team_profiles on every sign-up.
+-- The UNIQUE constraint on id can't serve here (id is nullable now),
+-- so point replica identity at the email unique index (email is
+-- not null + unique).
+alter table public.team_profiles replica identity using index team_profiles_email_key;
+
 -- Step 4: re-create the FKs. They bind to team_profiles_id_key now.
 alter table public.assignments
   add constraint assignments_created_by_fkey
