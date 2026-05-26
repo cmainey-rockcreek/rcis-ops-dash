@@ -38,31 +38,10 @@ create table if not exists public.team_profiles (
   updated_at    timestamptz not null default now()
 );
 create index if not exists team_profiles_active_idx on public.team_profiles (active, full_name);
-
--- Pending-invite support (idempotent migration of the above table).
--- Pending rows have no auth user yet, so id must be nullable. We:
---   1. add a plain UNIQUE constraint on id (UNIQUE allows multiple NULLs
---      in Postgres, and FKs from other tables can target it instead of
---      the PK we're about to drop);
---   2. drop the PK on id;
---   3. make id nullable;
---   4. add the invited flag.
--- The FK to auth.users(id) on delete cascade is a separate constraint
--- and is preserved. Email stays globally unique — it's the anchor the
--- sign-up trigger uses to claim the pending row.
--- On a first run the PK already covers id uniqueness; this UNIQUE
--- constraint is redundant there but harmless. On a re-run after the PK
--- has been dropped, the UNIQUE here is what FK targets resolve to.
-do $$ begin
-  alter table public.team_profiles add constraint team_profiles_id_key unique (id);
-exception when duplicate_object then null;
-end $$;
-do $$ begin
-  alter table public.team_profiles drop constraint team_profiles_pkey;
-exception when undefined_object then null;
-end $$;
-alter table public.team_profiles alter column id drop not null;
-alter table public.team_profiles add column if not exists invited boolean not null default false;
+-- Pending-invite support is at the bottom of this file (after every
+-- FK-bearing table is defined) so the FK drop/re-create dance can
+-- safely target tables that exist by then. See "Pending-invite
+-- migration" near the end.
 
 -- ─── coverage_gaps ───────────────────────────────────────────────────────
 -- Tracked needs (school-tied or district-wide). Drive the home page widget
@@ -788,3 +767,77 @@ do $$ begin
   alter publication supabase_realtime add table public.district_rate_cards;
 exception when duplicate_object then null;
 end $$;
+
+-- ─── Pending-invite migration ────────────────────────────────────────────
+-- Lives at the bottom because we need every FK-bearing table to exist
+-- before we can drop/re-create the FKs that point at team_profiles(id).
+--
+-- What this does:
+--   1. Drops the nine FKs that pin to team_profiles_pkey so the PK can
+--      be dropped (Postgres won't drop a constraint depended on by FKs).
+--   2. Adds a UNIQUE constraint on team_profiles.id (UNIQUE allows
+--      multiple NULLs in Postgres, which the pending rows need).
+--   3. Drops the PK; makes id nullable; adds the invited flag.
+--   4. Re-creates the nine FKs — they now bind to the UNIQUE constraint
+--      and continue to enforce referential integrity.
+--
+-- Idempotent. On a fresh database (PK still present), every step runs.
+-- On a re-run (PK already converted to UNIQUE), the FK drops succeed,
+-- the PK drop is a no-op via the do-block, the UNIQUE add is a no-op
+-- via the do-block, and the FK re-creates restore them. Net effect:
+-- always converge to "id nullable, UNIQUE, FKs intact, invited column
+-- present".
+
+-- Step 1: drop the FKs that pin to team_profiles_pkey.
+alter table public.assignments      drop constraint if exists assignments_created_by_fkey;
+alter table public.contractors      drop constraint if exists contractors_created_by_fkey;
+alter table public.coverage_gaps    drop constraint if exists coverage_gaps_created_by_fkey;
+alter table public.gap_comments     drop constraint if exists gap_comments_author_id_fkey;
+alter table public.match_proposals  drop constraint if exists match_proposals_created_by_fkey;
+alter table public.match_proposals  drop constraint if exists match_proposals_decided_by_fkey;
+alter table public.renewals         drop constraint if exists renewals_created_by_fkey;
+alter table public.schedule_slots   drop constraint if exists schedule_slots_created_by_fkey;
+alter table public.task_comments    drop constraint if exists task_comments_author_id_fkey;
+
+-- Step 2: add UNIQUE on id so FKs have a target after the PK is gone.
+do $$ begin
+  alter table public.team_profiles add constraint team_profiles_id_key unique (id);
+exception when duplicate_object then null;
+end $$;
+
+-- Step 3: drop the PK and relax id.
+do $$ begin
+  alter table public.team_profiles drop constraint team_profiles_pkey;
+exception when undefined_object then null;
+end $$;
+alter table public.team_profiles alter column id drop not null;
+alter table public.team_profiles add column if not exists invited boolean not null default false;
+
+-- Step 4: re-create the FKs. They bind to team_profiles_id_key now.
+alter table public.assignments
+  add constraint assignments_created_by_fkey
+  foreign key (created_by) references public.team_profiles(id) on delete set null;
+alter table public.contractors
+  add constraint contractors_created_by_fkey
+  foreign key (created_by) references public.team_profiles(id) on delete set null;
+alter table public.coverage_gaps
+  add constraint coverage_gaps_created_by_fkey
+  foreign key (created_by) references public.team_profiles(id) on delete set null;
+alter table public.gap_comments
+  add constraint gap_comments_author_id_fkey
+  foreign key (author_id) references public.team_profiles(id) on delete set null;
+alter table public.match_proposals
+  add constraint match_proposals_created_by_fkey
+  foreign key (created_by) references public.team_profiles(id) on delete set null;
+alter table public.match_proposals
+  add constraint match_proposals_decided_by_fkey
+  foreign key (decided_by) references public.team_profiles(id) on delete set null;
+alter table public.renewals
+  add constraint renewals_created_by_fkey
+  foreign key (created_by) references public.team_profiles(id) on delete set null;
+alter table public.schedule_slots
+  add constraint schedule_slots_created_by_fkey
+  foreign key (created_by) references public.team_profiles(id) on delete set null;
+alter table public.task_comments
+  add constraint task_comments_author_id_fkey
+  foreign key (author_id) references public.team_profiles(id) on delete set null;
