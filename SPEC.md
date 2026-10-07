@@ -33,13 +33,6 @@ from this file in that same commit.
 
 ## What's left
 
-### Prototype work — do first
-
-- **Multi-user + onboarding test pass.** With a second account, verify the
-  sign-up trigger and team list, realtime sync across users, per-user comment
-  permissions, the new user's avatar/initials/color, and the first-run
-  experience. Likely to surface its own follow-up items.
-
 ### Financials page
 
 The page exists at `/financials` with the margin calculator and the
