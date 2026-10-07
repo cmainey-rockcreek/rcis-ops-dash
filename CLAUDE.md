@@ -143,3 +143,18 @@ Key tables and their purpose:
 - `spec_settings` — per-specialty admin-editable config: `indirect_ratio` (drives the AssignmentEditor auto-indirect), `burden_per_billable_hour` (drives net margin), and default pay/bill rate bands. Edited from `/admin`.
 
 Every table gets a `touch_updated_at` trigger and is added to the `supabase_realtime` publication. When you add a table, follow the same three-step pattern in `schema.sql`: create → trigger → realtime → RLS policy.
+
+## Build process — follow this for every feature
+
+The owner is not a developer. They own the outcome and the behavior checks; Claude owns the code. Follow these steps in order and say which step you are on.
+
+1. **Goal + done-checklist.** Restate the request as an outcome in one or two sentences, then list the two or three behavior checks the owner will run. Confirm before continuing.
+2. **Plan before code.** Read the relevant files, propose the approach and name what will *not* change. Wait for approval. Anything touching `supabase/schema.sql` must also state the rollback.
+3. **Branch.** Create a git branch so `main` stays deployable.
+4. **Build in small steps.** One change at a time. Verify each in the browser at `http://localhost:4173` before moving on. No build step means a typo breaks the whole page, so check the console after every edit.
+5. **Owner tests.** Hand off with the done-checklist. Wait for the owner to confirm at localhost.
+6. **Review.** Run `/code-review`. Then answer three questions in plain English: what changed, what could break, what was not tested. Run `/security-review` if the change touches auth, keys, RLS policies, Storage, or Supabase schema.
+7. **Commit.** Message says why, not just what. Delete the finished item from `SPEC.md` in the same commit.
+8. **Push + Vercel preview.** Owner may need to push from GitHub Desktop. Check the preview URL as a teammate would.
+9. **Merge to `main`.** Confirm the Vercel deployment is READY and watch for errors.
+10. **Record what was learned.** Update this file or `SPEC.md` with anything the next session needs to know.
