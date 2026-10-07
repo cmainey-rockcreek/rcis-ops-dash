@@ -2014,8 +2014,8 @@
     const openAttachment = (a) => {
       if (a.source === 'upload' && helpers.openUploadedAttachment) {
         helpers.openUploadedAttachment(a);
-      } else if (a.url) {
-        window.open(a.url, '_blank', 'noreferrer');
+      } else if (window.safeHref(a.url)) {
+        window.open(window.safeHref(a.url), '_blank', 'noreferrer');
       }
     };
 
@@ -2605,7 +2605,7 @@
                   borderRadius: 4, fontFamily: 'ui-monospace, monospace',
                 }}>{meta.abbr}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <a href={d.url || '#'} onClick={open} style={{
+                  <a href={window.safeHref(d.url) || '#'} onClick={open} style={{
                     fontSize: 12.5, color: pal.text, fontWeight: 500,
                     textDecoration: 'none', display: 'block',
                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',

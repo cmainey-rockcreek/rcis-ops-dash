@@ -462,7 +462,7 @@
                       {a.name}
                     </button>
                   ) : (
-                    <a href={a.url} target="_blank" rel="noreferrer"
+                    <a href={window.safeHref(a.url) || undefined} target="_blank" rel="noreferrer"
                        onClick={(e) => e.stopPropagation()}
                        style={linkStyle}
                        onMouseEnter={(e) => e.currentTarget.style.color = pal.accent}

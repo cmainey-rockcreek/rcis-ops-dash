@@ -536,13 +536,16 @@
     const [name, setName] = React.useState('');
     const [uploading, setUploading] = React.useState(null); // file name being uploaded
     const [uploadError, setUploadError] = React.useState(null);
+    const [linkError, setLinkError] = React.useState('');
     const urlRef = React.useRef(null);
     const fileInputRef = React.useRef(null);
 
-    const reset = () => { setAdding(false); setUrl(''); setName(''); };
+    const reset = () => { setAdding(false); setUrl(''); setName(''); setLinkError(''); };
     const commit = () => {
       const trimmed = url.trim();
       if (!trimmed) return;
+      if (!window.safeHref(trimmed)) { setLinkError(window.LINK_SCHEME_ERROR); return; }
+      setLinkError('');
       const finalName = name.trim() || defaultAttachmentName(trimmed);
       const kind = detectAttachmentKind(trimmed, finalName);
       onChange([...attachments, {
@@ -617,7 +620,7 @@
                 }
               : {
                   as: 'a',
-                  href: a.url,
+                  href: window.safeHref(a.url) || undefined,
                   target: '_blank',
                   rel: 'noreferrer',
                   onClick: (e) => e.stopPropagation(),
@@ -689,7 +692,7 @@
                 ref={urlRef}
                 placeholder="Paste URL — Google Doc, Sheet, Drive, Dropbox, anything…"
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => { setUrl(e.target.value); if (linkError) setLinkError(''); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') reset(); }}
                 style={{
                   width: '100%', padding: '7px 10px',
@@ -699,6 +702,9 @@
                   outline: 'none', fontFamily: 'inherit',
                 }}
               />
+              {linkError && (
+                <div style={{ fontSize: 11.5, color: '#C0392B' }}>{linkError}</div>
+              )}
               <div style={{ display: 'flex', gap: 7 }}>
                 <input
                   placeholder={url ? defaultAttachmentName(url) : 'Display name (optional)'}

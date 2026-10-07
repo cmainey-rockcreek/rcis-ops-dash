@@ -43,7 +43,15 @@
           setInfo('Check your email to confirm the account, then sign in.');
         }
       } catch (err) {
-        setError(err.message || String(err));
+        const msg = err.message || String(err);
+        // The invite-only guard in handle_new_auth_user (schema.sql) raises
+        // inside the auth.users insert; GoTrue reports it as a generic
+        // "Database error saving new user".
+        if (mode === 'signup' && /database error/i.test(msg)) {
+          setError('Sign-ups are invite-only. Ask an RCIS admin to add you on the Admin page, then sign up with that same email.');
+        } else {
+          setError(msg);
+        }
       } finally {
         setBusy(false);
       }
@@ -119,8 +127,8 @@
 
           <div style={{ marginTop: 16, textAlign: 'center', fontSize: 12, color: 'rgba(26,24,21,.55)' }}>
             {mode === 'signin' ? (
-              <>First time? <a onClick={() => { setMode('signup'); setError(''); setInfo(''); }}
-                style={linkStyle}>Create an account</a></>
+              <>Invited by your team? <a onClick={() => { setMode('signup'); setError(''); setInfo(''); }}
+                style={linkStyle}>Create your account</a></>
             ) : (
               <>Already have an account? <a onClick={() => { setMode('signin'); setError(''); setInfo(''); }}
                 style={linkStyle}>Sign in</a></>

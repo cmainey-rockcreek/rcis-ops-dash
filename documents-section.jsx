@@ -69,6 +69,7 @@
     const [adding, setAdding] = React.useState(false);
     const [url, setUrl] = React.useState('');
     const [name, setName] = React.useState('');
+    const [linkError, setLinkError] = React.useState('');
     const urlRef = React.useRef(null);
     const meta = window.attachmentKindMeta;
 
@@ -76,10 +77,12 @@
       if (adding && urlRef.current) urlRef.current.focus();
     }, [adding]);
 
-    const reset = () => { setAdding(false); setUrl(''); setName(''); };
+    const reset = () => { setAdding(false); setUrl(''); setName(''); setLinkError(''); };
     const commit = async () => {
       const trimmed = url.trim();
       if (!trimmed) return;
+      if (!window.safeHref(trimmed)) { setLinkError(window.LINK_SCHEME_ERROR); return; }
+      setLinkError('');
       const finalName = name.trim() || defaultName(trimmed);
       const kind = detectKind(trimmed, finalName);
       await window.DocumentsStore.add({ scope, scopeId, kind, url: trimmed, name: finalName });
@@ -121,7 +124,7 @@
                     fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6,
                     borderRadius: 4, fontFamily: 'ui-monospace, monospace',
                   }}>{m.abbr}</span>
-                  <a href={d.url} target="_blank" rel="noreferrer"
+                  <a href={window.safeHref(d.url) || undefined} target="_blank" rel="noreferrer"
                      style={{
                        flex: 1, minWidth: 0,
                        textDecoration: 'none', color: 'inherit',
@@ -155,7 +158,7 @@
             display: 'flex', flexDirection: 'column', gap: 7,
           }}>
             <input ref={urlRef} value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => { setUrl(e.target.value); if (linkError) setLinkError(''); }}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') reset(); }}
               placeholder="Paste URL — Google Doc, Sheet, Drive, Dropbox, anything…"
               style={{
@@ -165,6 +168,9 @@
                 border: `1px solid ${pal.border}`, borderRadius: 6,
                 outline: 'none', fontFamily: 'inherit',
               }} />
+            {linkError && (
+              <div style={{ fontSize: 11.5, color: '#C0392B' }}>{linkError}</div>
+            )}
             <div style={{ display: 'flex', gap: 7 }}>
               <input value={name}
                 onChange={(e) => setName(e.target.value)}

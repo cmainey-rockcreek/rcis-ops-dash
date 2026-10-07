@@ -161,7 +161,8 @@ window.DocumentsStore = (() => {
           return;
         }
       }
-      if (doc.url) window.open(doc.url, '_blank', 'noreferrer');
+      const href = window.safeHref ? window.safeHref(doc.url) : null;
+      if (href) window.open(href, '_blank', 'noreferrer');
     },
 
     reload: load,

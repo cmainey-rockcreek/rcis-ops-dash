@@ -214,5 +214,19 @@ window.Icon = function Icon({ name, size = 16, color = 'currentColor', stroke = 
 // Returns a relative time string from a 'posted' label already in days.
 window.daysAgo = (s) => s;
 
+// Only let web/mail/phone links through. User-entered URLs are stored and
+// rendered as hrefs / passed to window.open; without this a teammate could
+// save a `javascript:` link that runs for everyone who clicks it.
+// Returns the normalized URL, or null when the scheme isn't allowed.
+window.safeHref = (url) => {
+  try {
+    const u = new URL(String(url || '').trim());
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(u.protocol) ? u.href : null;
+  } catch (e) {
+    return null;
+  }
+};
+window.LINK_SCHEME_ERROR = 'Links must start with http://, https://, mailto: or tel:.';
+
 // Each artboard's "frozen" date — Friday, May 16 2025 (Fri morning vibe).
 window.RCIS_TODAY = 'Friday, May 16';

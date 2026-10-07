@@ -377,7 +377,7 @@ alter table public.assignments          drop column if exists bill_rate;
 
 -- ─── Auto-update updated_at on row updates ────────────────────────────────
 create or replace function public.touch_updated_at()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = '' as $$
 begin
   new.updated_at = now();
   return new;
@@ -446,7 +446,7 @@ create trigger touch_district_rate_cards before update on public.district_rate_c
 
 -- ─── Auth user → team profile automation ─────────────────────────────────
 create or replace function public.profile_initials(full_name text, email text)
-returns text language plpgsql immutable as $$
+returns text language plpgsql immutable set search_path = '' as $$
 declare
   cleaned text;
   parts text[];
@@ -463,7 +463,7 @@ end;
 $$;
 
 create or replace function public.profile_color(user_id uuid)
-returns text language plpgsql immutable as $$
+returns text language plpgsql immutable set search_path = '' as $$
 declare
   colors text[] := array['#1FA39A', '#E76B5D', '#1B2956', '#7A5AE0', '#C98A2C', '#3E8A57', '#5A6478'];
   idx int;
@@ -474,12 +474,30 @@ end;
 $$;
 
 create or replace function public.handle_new_auth_user()
-returns trigger language plpgsql security definer set search_path = public as $$
+returns trigger language plpgsql security definer set search_path = '' as $$
 declare
   display_name text;
   claimed_count int;
 begin
   display_name := nullif(trim(coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', '')), '');
+
+  -- Sign-ups are invite-only. The publishable key ships to the browser and
+  -- every RLS policy trusts `authenticated`, so this check is the access
+  -- control: an email with no pending invite row cannot create an account.
+  -- GoTrue surfaces the exception as "Database error saving new user";
+  -- auth-gate.jsx maps that to a friendly message on the sign-up form.
+  -- Residual risk: someone who knows an invitee's email could register it
+  -- first and squat the pending row. With "Confirm email" on they can never
+  -- sign in; delete the squatter in Auth → Users and re-invite.
+  if not exists (
+    select 1 from public.team_profiles
+    where invited = true
+      and id is null
+      and lower(email) = lower(coalesce(new.email, ''))
+  ) then
+    raise exception 'SIGNUP_NOT_INVITED'
+      using hint = 'Sign-ups are invite-only. Ask an RCIS admin to add you on the Admin page first.';
+  end if;
 
   -- If an admin pre-added this teammate, claim that pending row by email
   -- (case-insensitive). Attach the new auth uid, clear the invited flag,
@@ -531,6 +549,33 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_auth_user();
+
+-- Trigger functions can't be called directly, but PostgREST still exposes
+-- them under /rest/v1/rpc/ and the security advisor flags it. Hide it.
+revoke execute on function public.handle_new_auth_user() from anon, authenticated, public;
+
+-- The team_profiles UPDATE policy is deliberately open (any teammate can
+-- edit any profile's name/role/active). This guard keeps that from being
+-- used to un-claim a profile, re-point it to another auth uid, or claim a
+-- pending invite by hand. Claims happen only via handle_new_auth_user,
+-- which runs in the auth-admin context where auth.uid() is null.
+create or replace function public.protect_team_profile_identity()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if old.id is not null and (new.id is distinct from old.id or new.invited = true) then
+    raise exception 'claimed team profiles cannot be un-claimed or re-pointed';
+  end if;
+  if old.id is null and new.id is not null and auth.uid() is not null then
+    raise exception 'pending invites are claimed by sign-up, not by edit';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_team_profile_identity on public.team_profiles;
+create trigger protect_team_profile_identity
+  before update on public.team_profiles
+  for each row execute function public.protect_team_profile_identity();
 
 insert into public.team_profiles (id, email, full_name, initials, color)
 select
@@ -849,3 +894,30 @@ alter table public.schedule_slots
 alter table public.task_comments
   add constraint task_comments_author_id_fkey
   foreign key (author_id) references public.team_profiles(id) on delete set null;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Storage: the `task-attachments` bucket (uploads for tasks, gaps, renewals,
+-- contractor docs). Private; files are served through short-lived signed
+-- URLs (todo-editor.jsx `openUploadedAttachment`). These policies were
+-- originally created in the dashboard; they live here now so git is the
+-- source of truth. Same trust model as the tables: any signed-in teammate.
+-- ═══════════════════════════════════════════════════════════════════════════
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('task-attachments', 'task-attachments', false, 10485760)
+on conflict (id) do nothing;
+
+drop policy if exists "team can read task attachments" on storage.objects;
+create policy "team can read task attachments" on storage.objects
+  for select to authenticated using (bucket_id = 'task-attachments');
+
+drop policy if exists "team can upload task attachments" on storage.objects;
+create policy "team can upload task attachments" on storage.objects
+  for insert to authenticated with check (bucket_id = 'task-attachments');
+
+drop policy if exists "team can update task attachments" on storage.objects;
+create policy "team can update task attachments" on storage.objects
+  for update to authenticated using (bucket_id = 'task-attachments') with check (bucket_id = 'task-attachments');
+
+drop policy if exists "team can delete task attachments" on storage.objects;
+create policy "team can delete task attachments" on storage.objects
+  for delete to authenticated using (bucket_id = 'task-attachments');

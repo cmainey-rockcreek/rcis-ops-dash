@@ -885,7 +885,7 @@
                   fontSize: 9.5, fontWeight: 800, letterSpacing: 0.6,
                   borderRadius: 4, fontFamily: 'ui-monospace, monospace',
                 }}>{meta.abbr}</span>
-                <a href={d.url || '#'} onClick={open} style={{
+                <a href={window.safeHref(d.url) || '#'} onClick={open} style={{
                   flex: 1, fontSize: 12.5, color: pal.text, fontWeight: 500,
                   textDecoration: 'none',
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',

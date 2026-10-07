@@ -50,6 +50,28 @@ contractor. Depends on a monthly time-entries CSV import from the time
 tracker; build after that import exists. Fully scoped in
 `docs/financials-page-scope.md`.
 
+### Security gate — before real data migration
+
+Found in the Oct 2026 security pass. Invite-only sign-up, the profile
+identity guard, link-scheme checks, SRI, and the schema hardening shipped
+then; these are the larger items that should land before real therapist /
+school data replaces the mocks. Today any signed-in teammate has full
+read/write on everything (RLS is `to authenticated using (true)`).
+
+- **Enforce `active` in RLS.** Deactivating a teammate on /admin is cosmetic;
+  they keep full access and could re-activate themselves via the open
+  `team_profiles` update policy. Needs an `is_active_member()` helper used by
+  every table policy, plus a guard so a user can't flip their own `active`.
+  Ties into the "Roles" open question below.
+- **Password recovery / change-password screen.** There is no reset flow, and
+  a `type=recovery` or `type=invite` link just signs the user in without
+  asking for a new password (`detectSessionInUrl` + hash router). Handle the
+  `PASSWORD_RECOVERY` auth event with a set-password form.
+- **Content-Security-Policy + production React.** No CSP headers in
+  `vercel.json`; `index.html` loads React/ReactDOM development builds and
+  compiles JSX in the browser. Add a CSP (script-src self + the four CDN
+  hosts, connect-src the Supabase project) and switch to production builds.
+
 ### After the real data migration
 
 - **Data export to CSV** — contractors, schools, districts, and contacts, from
