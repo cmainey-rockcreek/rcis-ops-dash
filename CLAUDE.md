@@ -62,7 +62,12 @@ Routing dispatch lives inline in `index.html` (`App`). Use `<Link to="/board">` 
 
 `<AuthGate>` (in `auth-gate.jsx`) wraps the whole app and blocks rendering until Supabase reports a session. Two ways in: email+password, and Google OAuth (`signInWithGoogle`, implicit flow). Password recovery goes through `resetPasswordForEmail`; the client tracks the `PASSWORD_RECOVERY` event (plus a `localStorage` flag) and `<AuthGate>` shows a set-password screen until `updateUser({ password })` succeeds. Redirect flows return to `location.origin + '/'`, which must be in Supabase Auth → URL Configuration. A failed redirect (e.g. uninvited Google account) comes back as `#error=…`; `supabase-client.js` reads and clears it before the client boots and the login screen shows it. First sign-in by either method auto-creates a row in `public.team_profiles` via a Postgres trigger (`handle_new_auth_user` in `supabase/schema.sql`), which also enforces invite-only sign-up.
 
-Supabase credentials live in `supabase-config.js` and are intentionally shipped to the browser — the publishable key is gated by **RLS policies**, not by secrecy. All policies in `supabase/schema.sql` grant `authenticated` users full read/write (`for all to authenticated using (true) with check (true)`), except for comment tables where users can only insert/delete their own rows. To change permissioning, edit the policies in `schema.sql` and re-paste into Supabase SQL Editor — the file is idempotent (uses `if not exists` / `drop policy if exists`).
+Supabase credentials live in `supabase-config.js` and are intentionally shipped to the browser — the publishable key is gated by **RLS policies**, not by secrecy. Access has two tiers, both decided by the caller's own `team_profiles` row through two `security definer` helpers in `schema.sql`:
+
+- `is_active_member()` — `active = true` on a claimed row. Every data table, the comment tables (own rows only), and the Storage bucket require it. A teammate toggled inactive on /admin is locked out even with a valid session; `<AuthGate>` shows an "account inactive" screen when `useCurrentProfile()` reports `active: false`.
+- `is_admin()` — `is_admin = true` as well. Required to invite, cancel invites, and update other people's profiles. Anyone can update their own row, but the `protect_team_profile_identity` trigger rejects changing your own `active` or `is_admin`, so nobody can reinstate or promote themselves. The free-text `role` column is a display label only.
+
+Nothing in `schema.sql` grants the first admin — after applying it, run `update public.team_profiles set is_admin = true where email = '…'` once. **Apply schema changes before deploying code that depends on them**: the store selects `is_admin`, and PostgREST returns 400 for an unknown column, which drops the team list to the prototype mocks. To change permissioning, edit the policies in `schema.sql` and re-paste into Supabase SQL Editor — the file is idempotent (uses `if not exists` / `drop policy if exists`).
 
 ### Store pattern (important — every store works this way)
 
@@ -136,7 +141,7 @@ Key tables and their purpose:
 - `assignments` — contractor → school/district placements with `schedule` (4×5 boolean grid: block × weekday).
 - `match_proposals` — Matchmaker shortlist (see above).
 - `schedule_slots` — row-per-time-block schedules, supports CSV/XLS import via `source='import'` + `import_batch_id`.
-- `team_profiles` — public-safe mirror of `auth.users`, auto-populated by trigger.
+- `team_profiles` — public-safe mirror of `auth.users`, auto-populated by trigger. `active` and `is_admin` drive RLS (see "Auth + data"); `invited` marks a pre-added row not yet claimed by sign-up.
 - `documents` — link docs (`source='link'`, `url` set) or uploaded docs (`source='upload'`, `storage_path` set). Uploads stream from the **`task-attachments` Storage bucket** (same bucket for tasks and renewals) via signed URLs.
 - `entity_notes` — free-text notes per (scope, scope_id).
 - `contractor_overrides`, `school_overrides`, `district_overrides` — see "Mock + override hybrid" above.

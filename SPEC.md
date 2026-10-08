@@ -17,8 +17,14 @@ email+password, "Forgot password?" recovery with a set-password screen,
 Workspace accounts (Google provider enabled in Supabase; redirect URLs for
 the live site, localhost, and Vercel previews are in the allowlist). All
 three were verified on localhost and the Google path on the Vercel preview.
-Next is the security gate below, starting with `active` in RLS; then the
-real data migration, then the items that depend on real data.
+Gotcha: if a redirect sign-in (Google, recovery link) started on localhost
+lands on the live site instead, `http://localhost:4173/**` is missing from
+Supabase Auth → URL Configuration → Redirect URLs. It was added Oct 8; the
+tell-tale is testing "on localhost" while actually running production code.
+Access control shipped Oct 8: a deactivated teammate is locked out by RLS,
+and only admins (`team_profiles.is_admin`, set from /admin) can invite,
+deactivate, or promote. Next is the CSP item below; then the real data
+migration, then the items that depend on real data.
 
 ## What we are building
 
@@ -58,20 +64,12 @@ tracker; build after that import exists. Fully scoped in
 ### Next up — security gate, before real data migration
 
 Found in the Oct 2026 security pass. Invite-only sign-up, the profile
-identity guard, link-scheme checks, SRI, the schema hardening, and the
-sign-in work (recovery, change-password, Google) have shipped. These are the
-remaining larger items that should land before real therapist / school data
-replaces the mocks. Today any signed-in teammate has full read/write on
-everything (RLS is `to authenticated using (true)`). Do them in this order.
+identity guard, link-scheme checks, SRI, the schema hardening, the sign-in
+work (recovery, change-password, Google), and active/admin enforcement in
+RLS have shipped. This is the remaining larger item that should land before
+real therapist / school data replaces the mocks.
 
-- **Enforce `active` in RLS.** First. Touches `supabase/schema.sql`, so the
-  plan step must state the rollback (re-run the previous policy block).
-  Deactivating a teammate on /admin is cosmetic;
-  they keep full access and could re-activate themselves via the open
-  `team_profiles` update policy. Needs an `is_active_member()` helper used by
-  every table policy, plus a guard so a user can't flip their own `active`.
-  Ties into the "Roles" open question below.
-- **Content-Security-Policy + production React.** Second. No CSP headers in
+- **Content-Security-Policy + production React.** No CSP headers in
   `vercel.json`; `index.html` loads React/ReactDOM development builds and
   compiles JSX in the browser. Add a CSP (script-src self + the four CDN
   hosts, connect-src the Supabase project; Google sign-in is a full-page
@@ -94,6 +92,12 @@ everything (RLS is `to authenticated using (true)`). Do them in this order.
 
 - **Page-by-page polish pass.** Review each page for rough edges, broken
   states, and visual inconsistency. Log anything larger as a new item here.
+- **`schema.sql` is not fresh-database safe.** The invite / cancel-invite
+  policies reference `team_profiles.invited`, but that column is only added
+  by the pending-invite migration at the bottom of the file. Fine on the
+  live project (column exists); a brand-new Supabase project would fail
+  partway. Fix: add `invited` with `add column if not exists` right after
+  the `create table` near the top, leaving the migration block as a no-op.
 - **Identity-provider name overwrites the admin-typed name.** On every
   sign-in `TeamStore.ensureCurrentProfile` replaces `full_name` with the
   name from the auth metadata (sign-up form, or Google's profile name). An
@@ -116,8 +120,13 @@ the migration sequence. Not yet scheduled; will get its own brief.
 
 - **"Today" source of truth.** `RCIS_TODAY` is frozen at a mock date while some
   date math uses the real current date. Pick one and apply it consistently.
-- **Roles.** Roles are currently labels only. Decide whether they should ever
-  control permissions (see Parking lot).
+- **Data-level permissions.** The admin flag gates team management only.
+  Every active teammate still has full read/write on contractors, schools,
+  districts, tasks, gaps, renewals, financial settings, and attachments.
+  Decide whether non-admins should ever be limited (pay / bill rates, the
+  Financials page, specialty settings are the likely candidates). That
+  would be a second RLS pass plus matching UI gating. The free-text `role`
+  stays a display label either way.
 
 ## Future direction — not urgent
 
@@ -138,4 +147,3 @@ the migration sequence. Not yet scheduled; will get its own brief.
   sign-up trigger; what's left is the dashboard emailing the invitee instead
   of the admin sharing the URL out of band. Needs a Supabase Edge Function to
   hold the service-role key; deferred past the prototype.
-- **Role-based permissions enforcement.**

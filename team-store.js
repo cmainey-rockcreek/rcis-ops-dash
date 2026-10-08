@@ -10,6 +10,13 @@
 
   let profiles = [];
   let loaded = false;
+  // False from sign-in until ensureCurrentProfile has settled, so the auth
+  // gate knows whether `active` / `isAdmin` below reflect the database yet.
+  // readyUserId remembers who it settled for: supabase-js re-fires
+  // onAuthStateChange on every hourly TOKEN_REFRESHED, and resetting
+  // readiness for the same user would blink the inactive screen off.
+  let profileReady = false;
+  let readyUserId = null;
   let currentUser = null;
   let subscription = null;
   const listeners = new Set();
@@ -42,6 +49,7 @@
       initials: row.initials || initialsFor(name, row.email),
       color: row.color || colorFor(row.id || row.email),
       active: row.active !== false,
+      isAdmin: row.is_admin === true,
       invited: row.invited === true,
       source: 'live',
     };
@@ -96,7 +104,7 @@
     }
     const { data, error } = await window.sb
       .from('team_profiles')
-      .select('id,email,full_name,role,initials,color,active,invited')
+      .select('id,email,full_name,role,initials,color,active,is_admin,invited')
       .order('full_name', { ascending: true });
 
     if (error) {
@@ -110,19 +118,36 @@
     publish();
   }
 
+  // Wraps the real work so profileReady flips true on every exit path —
+  // including the early returns and a thrown network error.
   async function ensureCurrentProfile(user) {
+    const sameUser = !!user && user.id === readyUserId;
+    if (!sameUser) profileReady = false;
+    try {
+      await syncCurrentProfile(user);
+    } finally {
+      readyUserId = user ? user.id : null;
+      profileReady = true;
+      emit();
+    }
+  }
+
+  async function syncCurrentProfile(user) {
     if (!window.sb || !user) return;
     currentUser = user;
 
     const metadataName = user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name);
     const { data: existing, error: readError } = await window.sb
       .from('team_profiles')
-      .select('id,full_name,initials,color,role,active')
+      .select('id,full_name,initials,color,role,active,is_admin')
       .eq('id', user.id)
       .maybeSingle();
 
     if (readError && readError.code !== 'PGRST116') {
       console.warn('Could not read current team profile.', readError.message || readError);
+      // Still load the team so active / isAdmin reflect the database rather
+      // than the "no profile" fallback (active, non-admin).
+      await load();
       return;
     }
 
@@ -140,14 +165,16 @@
     };
     // Only set active on first insert — preserve any admin deactivation on
     // subsequent sign-ins. (The /admin Active toggle lives in this column;
-    // forcing active:true here used to silently undo deactivations.)
+    // forcing active:true here used to silently undo deactivations, and
+    // the identity-guard trigger now rejects changing your own flag.)
+    // is_admin is never sent from here: it defaults false and only an
+    // admin can set it, on someone else's row.
     if (!existing) payload.active = true;
 
     const { error } = await window.sb.from('team_profiles').upsert(payload, { onConflict: 'id' });
-    if (error) {
-      console.warn('Could not save current team profile.', error.message || error);
-      return;
-    }
+    if (error) console.warn('Could not save current team profile.', error.message || error);
+    // Load regardless: a failed upsert must not leave profiles empty, or the
+    // gate would treat an admin as non-admin and an inactive user as active.
     await load();
   }
 
@@ -172,7 +199,34 @@
     return assignableMembers();
   }
 
-  // Optimistic patch on a profile row (name, role, initials, color, active).
+  // The signed-in user's own profile plus the two access flags the UI
+  // gates on. `active` and `isAdmin` are UX hints only — RLS enforces
+  // both server-side. A missing row (no profile yet, or Supabase down)
+  // reads as active so an outage never locks the owner out of the UI.
+  function currentProfile() {
+    const me = currentMember();
+    return {
+      ready: profileReady,
+      profile: me,
+      active: !me || me.active !== false,
+      isAdmin: !!(me && me.isAdmin),
+    };
+  }
+
+  function useCurrentProfile() {
+    const [, setTick] = React.useState(0);
+    React.useEffect(() => {
+      const listener = () => setTick((n) => n + 1);
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    }, []);
+    return currentProfile();
+  }
+
+  // Optimistic patch on a profile row (name, role, initials, color, active,
+  // isAdmin). RLS decides what sticks: anyone on their own row (minus the
+  // two flags), admins on any row. On error we reload so the optimistic
+  // value is replaced by the truth.
   // Lets the admin page do inline edits without re-fetching after each save.
   // Pending rows (id null) update via updatePendingProfile below — the
   // admin UI uses that path so name/role/initials/color edits work before
@@ -185,6 +239,7 @@
     if (patch.initials != null) fields.initials = patch.initials;
     if (patch.color != null)    fields.color    = patch.color;
     if (patch.active != null)   fields.active   = !!patch.active;
+    if (patch.isAdmin != null)  fields.is_admin = !!patch.isAdmin;
     if (Object.keys(fields).length === 0) return;
 
     profiles = profiles.map((p) => p.id === id ? { ...p, ...patch } : p);
@@ -207,6 +262,7 @@
     if (patch.initials != null) fields.initials = patch.initials;
     if (patch.color != null)    fields.color    = patch.color;
     if (patch.active != null)   fields.active   = !!patch.active;
+    if (patch.isAdmin != null)  fields.is_admin = !!patch.isAdmin;
     if (Object.keys(fields).length === 0) return;
 
     profiles = profiles.map((p) =>
@@ -276,6 +332,7 @@
     assignable: assignableMembers,
     profiles: liveProfiles,
     current: currentMember,
+    currentProfile,
     reload: load,
     ensureCurrentProfile,
     updateProfile,
@@ -286,13 +343,14 @@
   window.useTeam = () => useMembers('assignable');
   window.useAllTeam = () => useMembers('all');
   window.useAdminProfiles = () => useMembers('admin');
+  window.useCurrentProfile = useCurrentProfile;
 
   if (window.sb) {
     window.sb.auth.getSession().then(({ data }) => {
       currentUser = data.session ? data.session.user : null;
       subscribeRealtime();
       if (currentUser) ensureCurrentProfile(currentUser);
-      else load();
+      else { profileReady = true; load(); }
     });
 
     window.sb.auth.onAuthStateChange((_event, session) => {
@@ -300,6 +358,8 @@
       if (currentUser) ensureCurrentProfile(currentUser);
       else {
         profiles = [];
+        profileReady = true;
+        readyUserId = null;
         publish();
       }
     });
