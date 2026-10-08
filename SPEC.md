@@ -8,14 +8,17 @@ same commit that ships it; when new work is found, it is added here.
 **Guiding priority:** get a mostly working prototype in front of the team
 before investing in integrations or deep polish.
 
-**Where we are (Oct 7, 2026):** the prototype is live at
-`https://rcis-dash.vercel.app` on the free Supabase tier, sign-up is
-invite-only (add the teammate on /admin, they create their account with that
-email), and the multi-user onboarding pass is done with a second account.
-The team can start using it. Password recovery and Google sign-in are built
-(Oct 2026); Google needs the provider enabled in Supabase before it works on
-the live site. The sequence from here is: the rest of the security gate,
-then the real data migration, then the items that depend on real data.
+**Where we are (Oct 8, 2026):** the prototype is live at
+`https://rcis-dash.vercel.app` on the free Supabase tier and the team can
+start using it. Sign-up is invite-only (add the teammate on /admin, they
+create their account with that email). Sign-in shipped in full on Oct 8:
+email+password, "Forgot password?" recovery with a set-password screen,
+"Change password" on /admin, and "Continue with Google" for Rock Creek
+Workspace accounts (Google provider enabled in Supabase; redirect URLs for
+the live site, localhost, and Vercel previews are in the allowlist). All
+three were verified on localhost and the Google path on the Vercel preview.
+Next is the security gate below, starting with `active` in RLS; then the
+real data migration, then the items that depend on real data.
 
 ## What we are building
 
@@ -52,24 +55,29 @@ contractor. Depends on a monthly time-entries CSV import from the time
 tracker; build after that import exists. Fully scoped in
 `docs/financials-page-scope.md`.
 
-### Security gate — before real data migration
+### Next up — security gate, before real data migration
 
 Found in the Oct 2026 security pass. Invite-only sign-up, the profile
-identity guard, link-scheme checks, SRI, and the schema hardening shipped
-then; password recovery is the "Next up" item above. These are the remaining
-larger items that should land before real therapist / school data replaces
-the mocks. Today any signed-in teammate has full read/write on everything
-(RLS is `to authenticated using (true)`).
+identity guard, link-scheme checks, SRI, the schema hardening, and the
+sign-in work (recovery, change-password, Google) have shipped. These are the
+remaining larger items that should land before real therapist / school data
+replaces the mocks. Today any signed-in teammate has full read/write on
+everything (RLS is `to authenticated using (true)`). Do them in this order.
 
-- **Enforce `active` in RLS.** Deactivating a teammate on /admin is cosmetic;
+- **Enforce `active` in RLS.** First. Touches `supabase/schema.sql`, so the
+  plan step must state the rollback (re-run the previous policy block).
+  Deactivating a teammate on /admin is cosmetic;
   they keep full access and could re-activate themselves via the open
   `team_profiles` update policy. Needs an `is_active_member()` helper used by
   every table policy, plus a guard so a user can't flip their own `active`.
   Ties into the "Roles" open question below.
-- **Content-Security-Policy + production React.** No CSP headers in
+- **Content-Security-Policy + production React.** Second. No CSP headers in
   `vercel.json`; `index.html` loads React/ReactDOM development builds and
   compiles JSX in the browser. Add a CSP (script-src self + the four CDN
-  hosts, connect-src the Supabase project) and switch to production builds.
+  hosts, connect-src the Supabase project; Google sign-in is a full-page
+  redirect so it needs no extra origin) and switch to production builds.
+  Verify Google sign-in and the recovery link still land correctly after
+  the CSP is on, since both return via a URL fragment.
 
 ### After the real data migration
 
