@@ -40,6 +40,8 @@
 
   function TeamMembersSection({ pal }) {
     const profiles = window.useAdminProfiles ? window.useAdminProfiles() : [];
+    const auth = window.useAuth ? window.useAuth() : { user: null };
+    const myId = auth.user ? auth.user.id : null;
     // Sort: active claimed, then pending invites, then deactivated. The
     // pending tier sits between so a fresh invite stays visible without
     // disappearing into the "inactive" bottom.
@@ -104,7 +106,10 @@
             No team profiles yet — sign in or pre-add a teammate below.
           </div>
         ) : (
-          sorted.map((p) => <TeamRow key={p.id || ('pending:' + p.email)} p={p} pal={pal} />)
+          sorted.map((p) => (
+            <TeamRow key={p.id || ('pending:' + p.email)} p={p} pal={pal}
+              isMe={!p.invited && !!myId && p.id === myId} />
+          ))
         )}
 
         <InviteForm pal={pal} />
@@ -207,13 +212,14 @@
     );
   }
 
-  function TeamRow({ p, pal }) {
+  function TeamRow({ p, pal, isMe }) {
     // Claimed rows update by id; pending rows (no auth uid yet) update
     // by email. Same patch shape — the store fans out internally.
     const save = (patch) => p.invited
       ? window.TeamStore.updatePendingProfile(p.email, patch)
       : window.TeamStore.updateProfile(p.id, patch);
     return (
+      <>
       <div style={{
         display: 'grid',
         gridTemplateColumns: '44px 1.6fr 1.6fr 1fr 70px 110px 90px',
@@ -251,6 +257,86 @@
           : <ActiveToggle pal={pal} active={p.active}
               onChange={(v) => save({ active: v })} />}
       </div>
+      {isMe && <ChangePassword pal={pal} />}
+      </>
+    );
+  }
+
+  // Sub-row under the signed-in user's own profile. Collapsed to a link;
+  // expands to an inline new-password form. Uses the same updateUser call
+  // as the recovery flow, so it also sets a first password on a
+  // Google-only account.
+  function ChangePassword({ pal }) {
+    const [open, setOpen] = React.useState(false);
+    const [password, setPassword] = React.useState('');
+    const [confirm, setConfirm] = React.useState('');
+    const [busy, setBusy] = React.useState(false);
+    const [error, setError] = React.useState('');
+    const [okFlash, setOkFlash] = React.useState('');
+
+    const reset = () => { setPassword(''); setConfirm(''); setError(''); setBusy(false); };
+    const close = () => { reset(); setOpen(false); };
+
+    const submit = async (e) => {
+      e.preventDefault();
+      if (password !== confirm) { setError('Passwords do not match.'); return; }
+      setError(''); setBusy(true);
+      try {
+        await window.updatePassword(password);
+        close();
+        setOkFlash('Password updated.');
+        setTimeout(() => setOkFlash(''), 3000);
+      } catch (err) {
+        setError(err.message || String(err));
+        setBusy(false);
+      }
+    };
+
+    const wrap = {
+      padding: '6px 16px 10px 72px',
+      borderBottom: `1px solid ${pal.borderSoft}`,
+      fontSize: 11.5,
+    };
+    if (!open) {
+      return (
+        <div style={wrap}>
+          <a onClick={() => setOpen(true)} style={{ color: pal.accent, fontWeight: 600, cursor: 'pointer' }}>
+            Change password
+          </a>
+          {okFlash && <span style={{ marginLeft: 10, color: pal.accent }}>{okFlash}</span>}
+        </div>
+      );
+    }
+    const input = {
+      height: 28, padding: '0 9px', width: 190,
+      background: pal.inputBg, color: pal.text,
+      border: `1px solid ${pal.border}`, borderRadius: 6,
+      fontSize: 12, fontFamily: 'inherit', outline: 'none',
+    };
+    const btn = (primary) => ({
+      height: 28, padding: '0 11px', fontSize: 11.5, fontWeight: 600,
+      color: primary ? '#fff' : pal.textSoft,
+      background: primary ? pal.accent : 'transparent',
+      border: primary ? 'none' : `1px solid ${pal.border}`,
+      borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+      opacity: busy ? 0.6 : 1,
+    });
+    return (
+      <form onSubmit={submit} style={wrap}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <input type="password" required minLength={6} autoFocus autoComplete="new-password"
+            value={password} onChange={(e) => setPassword(e.target.value)}
+            placeholder="New password (6+ characters)" style={input} />
+          <input type="password" required minLength={6} autoComplete="new-password"
+            value={confirm} onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Confirm new password" style={input} />
+          <button type="submit" disabled={busy || password.length < 6 || !confirm} style={btn(true)}>
+            {busy ? 'Saving…' : 'Save password'}
+          </button>
+          <button type="button" onClick={close} disabled={busy} style={btn(false)}>Cancel</button>
+        </div>
+        {error && <div style={{ marginTop: 6, color: pal.warn }}>{error}</div>}
+      </form>
     );
   }
 

@@ -12,9 +12,10 @@ before investing in integrations or deep polish.
 `https://rcis-dash.vercel.app` on the free Supabase tier, sign-up is
 invite-only (add the teammate on /admin, they create their account with that
 email), and the multi-user onboarding pass is done with a second account.
-The team can start using it. The sequence from here is: password recovery
-(next), the rest of the security gate, then the real data migration, then
-the items that depend on real data.
+The team can start using it. Password recovery and Google sign-in are built
+(Oct 2026); Google needs the provider enabled in Supabase before it works on
+the live site. The sequence from here is: the rest of the security gate,
+then the real data migration, then the items that depend on real data.
 
 ## What we are building
 
@@ -40,29 +41,6 @@ from this file in that same commit.
 ---
 
 ## What's left
-
-### Next up — password recovery / change-password
-
-Nobody can reset a forgotten password today, and a `type=recovery` link just
-signs the user in without asking for a new one (`detectSessionInUrl` + the
-hash router in `router.jsx` swallow the `#access_token=…&type=recovery`
-fragment). First thing a teammate will hit, and nothing blocks it.
-
-- **"Forgot password?" link** on the sign-in form (`auth-gate.jsx`) that calls
-  `sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin })`
-  and shows "Check your email" (same style as the sign-up confirmation note).
-- **Set-password screen.** Listen for the `PASSWORD_RECOVERY` event in
-  `supabase-client.js` `onAuthStateChange` (it currently ignores the event
-  type) and render a new-password form instead of the app until
-  `sb.auth.updateUser({ password })` succeeds. Confirm the fragment is cleared
-  afterwards so a reload doesn't re-trigger it.
-- **Change password while signed in.** Small form on the user's own row in
-  /admin (or a menu item in the shell), also via `updateUser`.
-- Supabase side: the redirect URL must be in Auth → URL Configuration
-  (Site URL is already `https://rcis-dash.vercel.app`; add
-  `http://localhost:4173` for dev).
-- Verify with the real email flow on the live site, and check that a used
-  recovery link can't be replayed.
 
 ### Financials page
 
@@ -108,6 +86,12 @@ the mocks. Today any signed-in teammate has full read/write on everything
 
 - **Page-by-page polish pass.** Review each page for rough edges, broken
   states, and visual inconsistency. Log anything larger as a new item here.
+- **Identity-provider name overwrites the admin-typed name.** On every
+  sign-in `TeamStore.ensureCurrentProfile` replaces `full_name` with the
+  name from the auth metadata (sign-up form, or Google's profile name). An
+  admin edit on /admin is undone at the teammate's next sign-in. Decide
+  which should win and only fill from metadata when the profile name is
+  blank.
 
 ---
 
