@@ -1,6 +1,9 @@
 // Admin page — team management. Specialty settings (indirect ratio, burden,
 // rate bands) live on /financials since they're financial configuration.
-// Reads team_profiles via TeamStore and supports inline edits + active toggle.
+// Reads team_profiles via TeamStore and supports inline edits + active and
+// admin toggles. Admins manage everyone; non-admins see the table, can edit
+// their own name / role / initials / color, and change their password.
+// The gating here is UX — RLS in supabase/schema.sql is what enforces it.
 
 (function () {
   const { Icon } = window;
@@ -42,6 +45,8 @@
     const profiles = window.useAdminProfiles ? window.useAdminProfiles() : [];
     const auth = window.useAuth ? window.useAuth() : { user: null };
     const myId = auth.user ? auth.user.id : null;
+    const me = window.useCurrentProfile ? window.useCurrentProfile() : { isAdmin: false };
+    const canManage = me.isAdmin;
     // Sort: active claimed, then pending invites, then deactivated. The
     // pending tier sits between so a fresh invite stays visible without
     // disappearing into the "inactive" bottom.
@@ -78,13 +83,15 @@
             {activeCount} active{pendingCount > 0 ? ` · ${pendingCount} pending` : ''} · {sorted.length} total
           </span>
           <span style={{ marginLeft: 'auto', fontSize: 11.5, color: pal.textFaint }}>
-            Pre-add invites below; they link to the auth account on first sign-in.
+            {canManage
+              ? 'Pre-add invites below; they link to the auth account on first sign-in.'
+              : 'Only admins can invite teammates or change access. You can edit your own row.'}
           </span>
         </div>
 
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '44px 1.6fr 1.6fr 1fr 70px 110px 90px',
+          gridTemplateColumns: '44px 1.6fr 1.6fr 1fr 70px 110px 60px 90px',
           gap: 12, alignItems: 'center',
           padding: '10px 16px',
           background: pal.cardAlt,
@@ -98,6 +105,7 @@
           <span>Role</span>
           <span>Initials</span>
           <span>Color</span>
+          <span style={{ textAlign: 'right' }}>Admin</span>
           <span style={{ textAlign: 'right' }}>Status</span>
         </div>
 
@@ -108,11 +116,12 @@
         ) : (
           sorted.map((p) => (
             <TeamRow key={p.id || ('pending:' + p.email)} p={p} pal={pal}
-              isMe={!p.invited && !!myId && p.id === myId} />
+              isMe={!p.invited && !!myId && p.id === myId}
+              canManage={canManage} />
           ))
         )}
 
-        <InviteForm pal={pal} />
+        {canManage && <InviteForm pal={pal} />}
       </div>
     );
   }
@@ -212,17 +221,21 @@
     );
   }
 
-  function TeamRow({ p, pal, isMe }) {
+  function TeamRow({ p, pal, isMe, canManage }) {
     // Claimed rows update by id; pending rows (no auth uid yet) update
     // by email. Same patch shape — the store fans out internally.
     const save = (patch) => p.invited
       ? window.TeamStore.updatePendingProfile(p.email, patch)
       : window.TeamStore.updateProfile(p.id, patch);
+    // Admins edit any row; everyone edits their own. Nobody flips their
+    // own access flags — the trigger in schema.sql rejects it anyway.
+    const canEdit = canManage || isMe;
+    const canFlip = canManage && !isMe;
     return (
       <>
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '44px 1.6fr 1.6fr 1fr 70px 110px 90px',
+        gridTemplateColumns: '44px 1.6fr 1.6fr 1fr 70px 110px 60px 90px',
         gap: 12, alignItems: 'center',
         padding: '10px 16px',
         borderBottom: `1px solid ${pal.borderSoft}`,
@@ -236,7 +249,7 @@
         }}>{p.initials || '··'}</span>
 
         <EditableCell pal={pal} value={p.name} placeholder="Unnamed"
-          onSave={(v) => save({ name: v })} requireNonEmpty />
+          onSave={(v) => save({ name: v })} requireNonEmpty readOnly={!canEdit} />
 
         <span style={{
           fontSize: 12.5, color: pal.textSoft,
@@ -244,17 +257,27 @@
         }}>{p.email}</span>
 
         <EditableCell pal={pal} value={p.role} placeholder="Add role"
-          onSave={(v) => save({ role: v })} requireNonEmpty />
+          onSave={(v) => save({ role: v })} requireNonEmpty readOnly={!canEdit} />
 
         <EditableCell pal={pal} value={p.initials} placeholder="—"
-          monospace maxLen={3} requireNonEmpty
+          monospace maxLen={3} requireNonEmpty readOnly={!canEdit}
           onSave={(v) => save({ initials: (v || '').toUpperCase() })} />
 
-        <ColorPicker pal={pal} value={p.color} onSave={(v) => save({ color: v })} />
+        <ColorPicker pal={pal} value={p.color} onSave={(v) => save({ color: v })}
+          readOnly={!canEdit} />
+
+        <Toggle pal={pal} on={p.isAdmin} disabled={!canFlip}
+          title={isMe ? 'You cannot change your own admin flag'
+            : !canManage ? 'Only admins can change this'
+            : p.isAdmin ? 'Click to remove admin' : 'Click to make admin'}
+          onChange={(v) => save({ isAdmin: v })} />
 
         {p.invited
-          ? <PendingStatus pal={pal} email={p.email} />
-          : <ActiveToggle pal={pal} active={p.active}
+          ? <PendingStatus pal={pal} email={p.email} canCancel={canManage} />
+          : <Toggle pal={pal} on={p.active} disabled={!canFlip}
+              title={isMe ? 'You cannot deactivate yourself'
+                : !canManage ? 'Only admins can change this'
+                : p.active ? 'Click to deactivate' : 'Click to activate'}
               onChange={(v) => save({ active: v })} />}
       </div>
       {isMe && <ChangePassword pal={pal} />}
@@ -343,7 +366,7 @@
   // Status cell for a pending invite: a "Pending" pill plus a Cancel
   // affordance that deletes the pre-added row. Replaces the Active toggle
   // until the teammate signs up and the row gets claimed.
-  function PendingStatus({ pal, email }) {
+  function PendingStatus({ pal, email, canCancel }) {
     const [confirming, setConfirming] = React.useState(false);
     const cancel = () => {
       window.TeamStore.cancelInvite(email);
@@ -362,7 +385,7 @@
             padding: '2px 7px', borderRadius: 10,
             textTransform: 'uppercase',
           }}>Pending</span>
-        {confirming ? (
+        {!canCancel ? null : confirming ? (
           <span style={{ display: 'inline-flex', gap: 4 }}>
             <button onClick={cancel} title="Confirm cancel"
               style={pendingActionBtn(pal, true)}>Cancel</button>
@@ -386,7 +409,7 @@
     };
   }
 
-  function EditableCell({ pal, value, placeholder, onSave, requireNonEmpty, monospace, maxLen }) {
+  function EditableCell({ pal, value, placeholder, onSave, requireNonEmpty, monospace, maxLen, readOnly }) {
     const [editing, setEditing] = React.useState(false);
     const [draft, setDraft] = React.useState(value || '');
     const inputRef = React.useRef(null);
@@ -426,26 +449,26 @@
     }
     const display = value && value.trim().length > 0;
     return (
-      <span onClick={start} title="Click to edit"
+      <span onClick={readOnly ? undefined : start} title={readOnly ? undefined : 'Click to edit'}
         style={{
           fontSize: 12.5, fontWeight: 500,
           color: display ? pal.text : pal.textFaint,
           fontStyle: display ? 'normal' : 'italic',
           fontFamily: monospace ? 'ui-monospace, monospace' : 'inherit',
-          cursor: 'pointer',
+          cursor: readOnly ? 'default' : 'pointer',
           borderBottom: '1px dashed transparent',
           padding: '2px 0',
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           display: 'inline-block', maxWidth: '100%',
         }}
-        onMouseEnter={(e) => e.currentTarget.style.borderBottomColor = pal.borderSoft}
+        onMouseEnter={(e) => { if (!readOnly) e.currentTarget.style.borderBottomColor = pal.borderSoft; }}
         onMouseLeave={(e) => e.currentTarget.style.borderBottomColor = 'transparent'}>
         {display ? value : placeholder}
       </span>
     );
   }
 
-  function ColorPicker({ pal, value, onSave }) {
+  function ColorPicker({ pal, value, onSave, readOnly }) {
     const [open, setOpen] = React.useState(false);
     const wrapRef = React.useRef(null);
 
@@ -460,12 +483,13 @@
 
     return (
       <span ref={wrapRef} style={{ position: 'relative', display: 'inline-flex' }}>
-        <button onClick={() => setOpen((v) => !v)} title="Pick color"
+        <button onClick={() => { if (!readOnly) setOpen((v) => !v); }}
+          title={readOnly ? undefined : 'Pick color'} disabled={readOnly}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
             padding: '3px 7px',
             background: 'transparent', border: `1px solid ${pal.border}`,
-            borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+            borderRadius: 6, cursor: readOnly ? 'default' : 'pointer', fontFamily: 'inherit',
             color: pal.textSoft, fontSize: 11.5,
           }}>
           <span style={{
@@ -502,20 +526,24 @@
     );
   }
 
-  function ActiveToggle({ pal, active, onChange }) {
+  // Pill switch used for both the Active and Admin columns. Disabled
+  // renders the current state but ignores clicks — used on your own row
+  // and for non-admins.
+  function Toggle({ pal, on, disabled, title, onChange }) {
     return (
-      <button onClick={() => onChange(!active)}
-        title={active ? 'Click to deactivate' : 'Click to activate'}
+      <button onClick={() => { if (!disabled) onChange(!on); }}
+        title={title} disabled={disabled} aria-pressed={!!on}
         style={{
           marginLeft: 'auto',
           width: 36, height: 20, borderRadius: 999,
-          background: active ? pal.accent : pal.chipBg,
-          border: `1px solid ${active ? pal.accent : pal.border}`,
-          position: 'relative', cursor: 'pointer', padding: 0,
+          background: on ? pal.accent : pal.chipBg,
+          border: `1px solid ${on ? pal.accent : pal.border}`,
+          position: 'relative', cursor: disabled ? 'default' : 'pointer', padding: 0,
+          opacity: disabled ? 0.45 : 1,
           transition: 'background .12s ease',
         }}>
         <span style={{
-          position: 'absolute', top: 1, left: active ? 17 : 1,
+          position: 'absolute', top: 1, left: on ? 17 : 1,
           width: 16, height: 16, borderRadius: 8,
           background: '#fff',
           boxShadow: '0 1px 2px rgba(0,0,0,.2)',

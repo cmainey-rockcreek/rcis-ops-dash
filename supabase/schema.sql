@@ -38,6 +38,11 @@ create table if not exists public.team_profiles (
   updated_at    timestamptz not null default now()
 );
 create index if not exists team_profiles_active_idx on public.team_profiles (active, full_name);
+-- Admins manage the team on /admin (invite, deactivate, promote). Kept
+-- separate from the free-text `role` label, which is display only.
+-- Nothing in this file grants the first admin — see the bootstrap note in
+-- the "Access helpers" section below.
+alter table public.team_profiles add column if not exists is_admin boolean not null default false;
 -- Pending-invite support is at the bottom of this file (after every
 -- FK-bearing table is defined) so the FK drop/re-create dance can
 -- safely target tables that exist by then. See "Pending-invite
@@ -482,8 +487,8 @@ begin
   display_name := nullif(trim(coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', '')), '');
 
   -- Sign-ups are invite-only. The publishable key ships to the browser and
-  -- every RLS policy trusts `authenticated`, so this check is the access
-  -- control: an email with no pending invite row cannot create an account.
+  -- every RLS policy trusts an active team profile, so this check is the
+  -- front door: an email with no pending invite row cannot create an account.
   -- GoTrue surfaces the exception as "Database error saving new user";
   -- auth-gate.jsx maps that to a friendly message on the sign-up form.
   -- Residual risk: someone who knows an invitee's email could register it
@@ -554,11 +559,14 @@ create trigger on_auth_user_created
 -- them under /rest/v1/rpc/ and the security advisor flags it. Hide it.
 revoke execute on function public.handle_new_auth_user() from anon, authenticated, public;
 
--- The team_profiles UPDATE policy is deliberately open (any teammate can
--- edit any profile's name/role/active). This guard keeps that from being
--- used to un-claim a profile, re-point it to another auth uid, or claim a
--- pending invite by hand. Claims happen only via handle_new_auth_user,
--- which runs in the auth-admin context where auth.uid() is null.
+-- The team_profiles UPDATE policy lets admins edit any row and everyone
+-- edit their own. This guard keeps that from being used to un-claim a
+-- profile, re-point it to another auth uid, or claim a pending invite by
+-- hand. Claims happen only via handle_new_auth_user, which runs in the
+-- auth-admin context where auth.uid() is null. It also stops anyone from
+-- changing their own `active` or `is_admin`: an admin can't lock themselves
+-- out, and a deactivated or non-admin user can't reinstate or promote
+-- themselves. Those flags are changed on other people's rows from /admin.
 create or replace function public.protect_team_profile_identity()
 returns trigger language plpgsql set search_path = '' as $$
 begin
@@ -567,6 +575,10 @@ begin
   end if;
   if old.id is null and new.id is not null and auth.uid() is not null then
     raise exception 'pending invites are claimed by sign-up, not by edit';
+  end if;
+  if auth.uid() is not null and old.id = auth.uid()
+     and (new.active is distinct from old.active or new.is_admin is distinct from old.is_admin) then
+    raise exception 'you cannot change your own active or admin flag';
   end if;
   return new;
 end;
@@ -589,10 +601,54 @@ on conflict (id) do update set
   email = excluded.email,
   updated_at = now();
 
+-- ─── Access helpers used by every RLS policy ──────────────────────────────
+-- Two tiers. An *active member* (team_profiles.active, claimed row) has
+-- full read/write on the working data. An *admin* (team_profiles.is_admin)
+-- can additionally manage the team: invite, cancel invites, edit other
+-- people's profiles, and flip `active` / `is_admin` on other rows.
+--
+-- Both run as security definer so a policy on team_profiles itself can
+-- call them without the "infinite recursion detected in policy" error
+-- Postgres raises when a policy queries the table it protects. They read
+-- only the caller's own row, keyed on auth.uid(). plpgsql rather than sql
+-- so the body isn't validated against columns that are added further down
+-- this file (`invited`).
+--
+-- Bootstrap: nothing here grants the first admin. After running this file
+-- once, run (with your own email):
+--   update public.team_profiles set is_admin = true where email = 'you@rockcreekteletherapy.com';
+create or replace function public.is_active_member()
+returns boolean language plpgsql stable security definer set search_path = '' as $$
+begin
+  return exists (
+    select 1 from public.team_profiles
+    where id = auth.uid() and active = true and invited = false
+  );
+end;
+$$;
+
+create or replace function public.is_admin()
+returns boolean language plpgsql stable security definer set search_path = '' as $$
+begin
+  return exists (
+    select 1 from public.team_profiles
+    where id = auth.uid() and active = true and invited = false and is_admin = true
+  );
+end;
+$$;
+
+revoke execute on function public.is_active_member() from anon, public;
+revoke execute on function public.is_admin() from anon, public;
+grant execute on function public.is_active_member() to authenticated;
+grant execute on function public.is_admin() to authenticated;
+
 -- ─── Row-level security ───────────────────────────────────────────────────
--- Enable RLS on all tables, then grant authenticated users full access.
--- This means: only logged-in team members can read or write anything,
--- and anonymous (logged-out) access is blocked.
+-- Enable RLS on all tables, then grant *active* team members full access.
+-- This means: only signed-in, active team members can read or write the
+-- working data. Anonymous access is blocked, and a teammate deactivated on
+-- /admin is locked out even though their auth session is still valid.
+-- Policies call the helpers as `(select ...)` so Postgres evaluates them
+-- once per statement rather than once per row.
 alter table public.todos          enable row level security;
 alter table public.task_comments  enable row level security;
 alter table public.coverage_gaps  enable row level security;
@@ -614,75 +670,91 @@ alter table public.district_rate_cards enable row level security;
 
 drop policy if exists "team full access" on public.todos;
 create policy "team full access" on public.todos
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team can read task comments" on public.task_comments;
 create policy "team can read task comments"
-  on public.task_comments for select to authenticated using (true);
+  on public.task_comments for select to authenticated using ((select public.is_active_member()));
 
 drop policy if exists "team can create own task comments" on public.task_comments;
 create policy "team can create own task comments"
   on public.task_comments for insert to authenticated
-  with check (auth.uid() = author_id);
+  with check (auth.uid() = author_id and (select public.is_active_member()));
 
 drop policy if exists "team can delete own task comments" on public.task_comments;
 create policy "team can delete own task comments"
   on public.task_comments for delete to authenticated
-  using (auth.uid() = author_id);
+  using (auth.uid() = author_id and (select public.is_active_member()));
 
 drop policy if exists "team full access" on public.coverage_gaps;
 create policy "team full access" on public.coverage_gaps
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.renewals;
 create policy "team full access" on public.renewals
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.assignments;
 create policy "team full access" on public.assignments
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.contractor_overrides;
 create policy "team full access" on public.contractor_overrides
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.school_overrides;
 create policy "team full access" on public.school_overrides
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.district_overrides;
 create policy "team full access" on public.district_overrides
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.schedule_slots;
 create policy "team full access" on public.schedule_slots
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.match_proposals;
 create policy "team full access" on public.match_proposals
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team can read gap comments" on public.gap_comments;
 create policy "team can read gap comments"
-  on public.gap_comments for select to authenticated using (true);
+  on public.gap_comments for select to authenticated using ((select public.is_active_member()));
 
 drop policy if exists "team can create own gap comments" on public.gap_comments;
 create policy "team can create own gap comments"
   on public.gap_comments for insert to authenticated
-  with check (auth.uid() = author_id);
+  with check (auth.uid() = author_id and (select public.is_active_member()));
 
 drop policy if exists "team can delete own gap comments" on public.gap_comments;
 create policy "team can delete own gap comments"
   on public.gap_comments for delete to authenticated
-  using (auth.uid() = author_id);
+  using (auth.uid() = author_id and (select public.is_active_member()));
 
 drop policy if exists "team profiles visible to signed-in users" on public.team_profiles;
+-- Active members see the whole team. Everyone can always read their own
+-- row, so a deactivated teammate's app can tell them why nothing loads.
 create policy "team profiles visible to signed-in users" on public.team_profiles
-  for select to authenticated using (true);
+  for select to authenticated
+  using (id = auth.uid() or (select public.is_active_member()));
 
+-- Self-insert is the fallback for a user whose row somehow went missing
+-- (handle_new_auth_user normally creates it). The row they create must be
+-- a plain active member: never admin, never a pending invite.
 drop policy if exists "users can create own team profile" on public.team_profiles;
 create policy "users can create own team profile" on public.team_profiles
-  for insert to authenticated with check (auth.uid() = id);
+  for insert to authenticated
+  with check (auth.uid() = id and is_admin = false and invited = false);
 
 -- Drop the narrower per-user update policy: Postgres ORs RLS policies on
 -- the same action, so this restriction was dead the moment we added the
@@ -690,53 +762,62 @@ create policy "users can create own team profile" on public.team_profiles
 -- the intent explicit and avoids a false sense of restriction.
 drop policy if exists "users can update own team profile" on public.team_profiles;
 
--- Admin page edits other teammates' rows (rename, role, initials, color,
--- active toggle). Trusted internal team — every signed-in user is an admin.
+-- Everyone can edit their own row (name, initials, color — the identity
+-- guard trigger blocks `active` / `is_admin` on your own row). Admins can
+-- edit any row, including other people's `active` and `is_admin`.
 drop policy if exists "team can update team profiles" on public.team_profiles;
 create policy "team can update team profiles" on public.team_profiles
-  for update to authenticated using (true) with check (true);
+  for update to authenticated
+  using (id = auth.uid() or (select public.is_admin()))
+  with check (id = auth.uid() or (select public.is_admin()));
 
 -- Pre-add ("invite") a teammate from the Admin page: creates a pending
--- row with no auth uid yet. Restricted to rows that are clearly pending
--- (id is null, invited = true) so this policy can't be abused to insert
--- a row claiming someone else's auth uid — that's still gated by the
--- "users can create own team profile" policy above.
+-- row with no auth uid yet. Admins only. Restricted to rows that are
+-- clearly pending (id is null, invited = true) so this policy can't be
+-- abused to insert a row claiming someone else's auth uid — that's still
+-- gated by the "users can create own team profile" policy above.
 drop policy if exists "team can invite teammates" on public.team_profiles;
 create policy "team can invite teammates" on public.team_profiles
   for insert to authenticated
-  with check (id is null and invited = true);
+  with check (id is null and invited = true and (select public.is_admin()));
 
--- Cancel a pending invite from the Admin page. Restricted to pending
+-- Cancel a pending invite from the Admin page. Admins only, and pending
 -- rows only — claimed profiles can't be deleted through the app (auth
 -- account deletion cascades from auth.users).
 drop policy if exists "team can cancel pending invites" on public.team_profiles;
 create policy "team can cancel pending invites" on public.team_profiles
   for delete to authenticated
-  using (id is null and invited = true);
+  using (id is null and invited = true and (select public.is_admin()));
 
 drop policy if exists "team full access" on public.contacts;
 create policy "team full access" on public.contacts
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.documents;
 create policy "team full access" on public.documents
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.entity_notes;
 create policy "team full access" on public.entity_notes
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.spec_settings;
 create policy "team full access" on public.spec_settings
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.contractors;
 create policy "team full access" on public.contractors
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 drop policy if exists "team full access" on public.district_rate_cards;
 create policy "team full access" on public.district_rate_cards
-  for all to authenticated using (true) with check (true);
+  for all to authenticated
+  using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
 -- ─── Realtime ─────────────────────────────────────────────────────────────
 -- Lets the app receive live updates when teammates change anything.
@@ -845,9 +926,17 @@ alter table public.schedule_slots   drop constraint if exists schedule_slots_cre
 alter table public.task_comments    drop constraint if exists task_comments_author_id_fkey;
 
 -- Step 2: add UNIQUE on id so FKs have a target after the PK is gone.
+-- Guarded by a catalog lookup rather than an exception handler: on a
+-- re-run Postgres reports the existing constraint's backing *index* as
+-- 42P07 duplicate_table, not duplicate_object, so the old handler let the
+-- error through and aborted the whole file.
 do $$ begin
-  alter table public.team_profiles add constraint team_profiles_id_key unique (id);
-exception when duplicate_object then null;
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'team_profiles_id_key' and conrelid = 'public.team_profiles'::regclass
+  ) then
+    alter table public.team_profiles add constraint team_profiles_id_key unique (id);
+  end if;
 end $$;
 
 -- Step 3: drop the PK and relax id.
@@ -900,7 +989,7 @@ alter table public.task_comments
 -- contractor docs). Private; files are served through short-lived signed
 -- URLs (todo-editor.jsx `openUploadedAttachment`). These policies were
 -- originally created in the dashboard; they live here now so git is the
--- source of truth. Same trust model as the tables: any signed-in teammate.
+-- source of truth. Same trust model as the tables: any active teammate.
 -- ═══════════════════════════════════════════════════════════════════════════
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('task-attachments', 'task-attachments', false, 10485760)
@@ -908,16 +997,16 @@ on conflict (id) do nothing;
 
 drop policy if exists "team can read task attachments" on storage.objects;
 create policy "team can read task attachments" on storage.objects
-  for select to authenticated using (bucket_id = 'task-attachments');
+  for select to authenticated using (bucket_id = 'task-attachments' and (select public.is_active_member()));
 
 drop policy if exists "team can upload task attachments" on storage.objects;
 create policy "team can upload task attachments" on storage.objects
-  for insert to authenticated with check (bucket_id = 'task-attachments');
+  for insert to authenticated with check (bucket_id = 'task-attachments' and (select public.is_active_member()));
 
 drop policy if exists "team can update task attachments" on storage.objects;
 create policy "team can update task attachments" on storage.objects
-  for update to authenticated using (bucket_id = 'task-attachments') with check (bucket_id = 'task-attachments');
+  for update to authenticated using (bucket_id = 'task-attachments' and (select public.is_active_member())) with check (bucket_id = 'task-attachments' and (select public.is_active_member()));
 
 drop policy if exists "team can delete task attachments" on storage.objects;
 create policy "team can delete task attachments" on storage.objects
-  for delete to authenticated using (bucket_id = 'task-attachments');
+  for delete to authenticated using (bucket_id = 'task-attachments' and (select public.is_active_member()));

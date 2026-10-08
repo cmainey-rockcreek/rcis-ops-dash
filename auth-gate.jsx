@@ -1,13 +1,29 @@
 // AuthGate — wraps the whole app. Shows login screen if not signed in,
-// a set-password screen if a recovery link signed the user in, otherwise
-// renders the children.
+// a set-password screen if a recovery link signed the user in, an
+// "account inactive" screen if an admin has deactivated this profile,
+// otherwise renders the children.
 
 (function () {
   function AuthGate({ children }) {
     const auth = window.useAuth();
+    const me = window.useCurrentProfile ? window.useCurrentProfile() : { ready: true, active: true };
+    const inactive = auth.status === 'in' && !auth.recovery && me.ready && !me.active;
+    // Reactivation mid-session: every data store loaded empty under RLS
+    // while this user was inactive, and realtime only delivers future
+    // changes. A full reload is the one honest way to refill them.
+    const wasInactive = React.useRef(false);
+    React.useEffect(() => {
+      if (inactive) { wasInactive.current = true; return; }
+      if (wasInactive.current && auth.status === 'in') window.location.reload();
+    }, [inactive, auth.status]);
     if (auth.status === 'loading') return <Splash />;
     if (auth.status === 'out')     return <LoginScreen />;
     if (auth.recovery)             return <SetPasswordScreen />;
+    // Only an explicit active=false from the database blocks the UI. While
+    // the profile is still loading, or if it can't be read at all, the app
+    // renders as before — RLS is what actually enforces access, this screen
+    // just explains why nothing loads.
+    if (inactive)                  return <InactiveScreen />;
     return children;
   }
 
@@ -256,6 +272,25 @@
         </form>
         <div style={{ marginTop: 16, textAlign: 'center', fontSize: 12, color: 'rgba(26,24,21,.55)' }}>
           <a onClick={() => window.signOut && window.signOut()} style={linkStyle}>Cancel and sign out</a>
+        </div>
+      </Card>
+    );
+  }
+
+  // Shown to a signed-in teammate whose profile an admin has deactivated.
+  // RLS already refuses their reads and writes; this replaces the empty
+  // dashboard they would otherwise see. Realtime on team_profiles flips
+  // this both ways within seconds of the toggle on /admin.
+  function InactiveScreen() {
+    const auth = window.useAuth();
+    return (
+      <Card title="Your account is inactive" subtitle={auth.user ? auth.user.email : ''}>
+        <Notice kind="info">
+          An admin has deactivated this account. Ask an RCIS admin to reactivate it on the
+          Admin page. This screen updates on its own once that happens.
+        </Notice>
+        <div style={{ marginTop: 16, textAlign: 'center', fontSize: 12, color: 'rgba(26,24,21,.55)' }}>
+          <a onClick={() => window.signOut && window.signOut()} style={linkStyle}>Sign out</a>
         </div>
       </Card>
     );
