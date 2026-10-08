@@ -11,20 +11,22 @@ before investing in integrations or deep polish.
 **Where we are (Oct 8, 2026):** the prototype is live at
 `https://rcis-dash.vercel.app` on the free Supabase tier and the team can
 start using it. Sign-up is invite-only (add the teammate on /admin, they
-create their account with that email). Sign-in shipped in full on Oct 8:
-email+password, "Forgot password?" recovery with a set-password screen,
-"Change password" on /admin, and "Continue with Google" for Rock Creek
-Workspace accounts (Google provider enabled in Supabase; redirect URLs for
-the live site, localhost, and Vercel previews are in the allowlist). All
-three were verified on localhost and the Google path on the Vercel preview.
-Gotcha: if a redirect sign-in (Google, recovery link) started on localhost
-lands on the live site instead, `http://localhost:4173/**` is missing from
-Supabase Auth → URL Configuration → Redirect URLs. It was added Oct 8; the
-tell-tale is testing "on localhost" while actually running production code.
-Access control shipped Oct 8: a deactivated teammate is locked out by RLS,
-and only admins (`team_profiles.is_admin`, set from /admin) can invite,
-deactivate, or promote. Next is the CSP item below; then the real data
-migration, then the items that depend on real data.
+create their account with that email) and sign-in is complete: email +
+password, "Forgot password?" recovery, "Change password" on /admin, and
+"Continue with Google" for Rock Creek Workspace accounts.
+
+Access control shipped Oct 8 and is applied to the live database. A
+teammate toggled inactive on /admin is refused every read and write by RLS
+and sees an "account inactive" screen until reactivated. Only admins
+(`team_profiles.is_admin`, toggled on /admin) can invite, cancel invites,
+edit other profiles, or flip Active / Admin, and nobody can change their own
+flags. Christo is the admin. The free-text role stays a display label. If it
+ever needs undoing, `supabase/rollback-rls-active-admin.sql` restores the old
+policies in one paste.
+
+**Next:** the Content-Security-Policy + production React item below is the
+last piece of the security gate. After it comes the real data migration,
+then the items that depend on real data.
 
 ## What we are building
 
@@ -43,6 +45,12 @@ There is no automated test suite. After each item, verify by hand:
 2. Open `http://localhost:4173` in a browser.
 3. Confirm the page loads with no errors in the browser console, and the change
    works as described.
+4. Sign in with email + password on localhost. Google and recovery-link
+   sign-ins return through Supabase and only come back to localhost because
+   `http://localhost:4173/**` is in Auth → URL Configuration → Redirect URLs
+   (added Oct 8). If a redirect ever lands on the live site, you are testing
+   production code, not the change. Check the address bar before trusting a
+   result.
 
 Commit each completed item with a short, clear message, and delete the item
 from this file in that same commit.
