@@ -69,6 +69,20 @@ contractor. Depends on a monthly time-entries CSV import from the time
 tracker; build after that import exists. Fully scoped in
 `docs/financials-page-scope.md`.
 
+### Assignments master page
+
+A new `#/assignments` page that lists every assignment in one place so the
+team can see which schools have which contractors. Today a saved assignment
+is visible only on its contractor's page. Grouped by school (district-wide
+rows under their district) with a flat sortable table toggle; columns are
+contractor, direct / indirect hours, dates, and weekly gross margin (no
+rates); completed rows hidden behind a "Show completed" chip; click a saved
+row to open the existing assignment editor; "New assignment" picks a
+contractor first; "Export CSV" of the visible rows (first working CSV in
+the app). Scoped and approved Oct 9, 2026, build deferred by the owner.
+Full build brief in `docs/assignments-page-scope.md`. Includes a one-token
+fix for district-wide rows showing "—" on the contractor page.
+
 ### Next up — security gate, before real data migration
 
 Found in the Oct 2026 security pass. Invite-only sign-up, the profile
