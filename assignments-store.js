@@ -336,3 +336,147 @@ window.bookedHoursFor = function bookedHoursFor(c, persistedAssignments) {
   }
   return booked;
 };
+
+// Company-wide view: every assignment across every contractor, mock seeds
+// and persisted rows alike, flattened to one shape so the /assignments
+// master page (and anything else that wants "all placements") doesn't
+// re-implement the merge in useContractorAssignments.
+//
+// Pure. `persisted` is AssignmentsStore.get(), `contractors` is the live
+// RCIS_DATA.CONTRACTORS catalog, `overridesMap` is
+// ContractorOverridesStore.get(). Names resolve through the live display
+// helpers (so renames show up) and fall back to the stored snapshot.
+// Saved rows whose contractor is no longer in the catalog are still
+// emitted, so nothing silently disappears from the page.
+//
+// Row shape:
+//   { key, _id, source('mock'|'supabase'), contractorId, contractorName,
+//     spec, schoolId, schoolName, districtId, districtName, state,
+//     direct, indirect, indirectOverride, payRate, defaultPay,
+//     startDate, endDate, status, attachmentCount }
+window.allAssignmentRows = function allAssignmentRows(persisted, contractors, overridesMap) {
+  const out = [];
+  const list = Array.isArray(contractors) ? contractors : [];
+  const apply = window.applyContractorOverride || ((c) => c);
+  const enrichedById = new Map();
+  for (const c of list) {
+    if (c && c.id) enrichedById.set(c.id, apply(c, overridesMap) || c);
+  }
+  // Resolve names and school→district once per call via Maps rather than
+  // a linear find per row: this runs in the sidebar on every page whenever
+  // any of its stores ticks, and real data is ~250 schools × hundreds of
+  // rows.
+  const SCHOOLS = (window.RCIS_DATA && window.RCIS_DATA.SCHOOLS) || [];
+  const DISTRICTS = (window.RCIS_DATA && window.RCIS_DATA.DISTRICTS) || [];
+  const applySchool = window.applySchoolOverride || ((s) => s);
+  const applyDistrict = window.applyDistrictOverride || ((d) => d);
+  const schoolById = new Map();
+  for (const s of SCHOOLS) if (s && s.id) schoolById.set(s.id, applySchool(s) || s);
+  const districtById = new Map();
+  for (const d of DISTRICTS) if (d && d.id) districtById.set(d.id, applyDistrict(d) || d);
+  const districtIdFor = (row) => {
+    if (row.districtId) return row.districtId;
+    const s = row.schoolId ? schoolById.get(row.schoolId) : null;
+    return (s && s.district) || null;
+  };
+  const schoolName = (id, fallback) => {
+    const s = id ? schoolById.get(id) : null;
+    return (s && s.name) || fallback || '';
+  };
+  const districtName = (id, fallback) => {
+    const d = id ? districtById.get(id) : null;
+    return (d && d.name) || fallback || '';
+  };
+  const defaultPayFor = (c) => (c && c.rates && Number.isFinite(Number(c.rates.hourly)))
+    ? Number(c.rates.hourly) : 0;
+  const autoIndirect = window.AssignmentsStore && window.AssignmentsStore.autoIndirect
+    ? window.AssignmentsStore.autoIndirect : (() => 0);
+
+  // Persisted rows first so they're easy to spot in debugging; the page
+  // re-sorts anyway.
+  for (const a of (Array.isArray(persisted) ? persisted : [])) {
+    const c = enrichedById.get(a.contractorId) || null;
+    const spec = a.spec || (c && c.spec) || '';
+    const direct = Number(a.directHours) || 0;
+    const indirect = a.indirectOverride
+      ? (Number(a.indirectHours) || 0)
+      : autoIndirect(direct, spec);
+    const districtId = a.districtId || districtIdFor({ schoolId: a.schoolId }) || null;
+    out.push({
+      key: 's:' + a.id,
+      _id: a.id,
+      source: 'supabase',
+      contractorId: a.contractorId,
+      contractorName: (c && c.name) || a.contractorName || '',
+      spec,
+      schoolId: a.schoolId || null,
+      schoolName: schoolName(a.schoolId, a.schoolName),
+      districtId,
+      districtName: districtName(districtId, a.districtName),
+      state: '',
+      direct, indirect,
+      indirectOverride: !!a.indirectOverride,
+      payRate: a.payRate != null ? Number(a.payRate) : null,
+      defaultPay: defaultPayFor(c),
+      startDate: a.startDate || '',
+      endDate: a.endDate || null,
+      status: a.status || 'active',
+      attachmentCount: Array.isArray(a.attachments) ? a.attachments.length : 0,
+    });
+  }
+
+  for (const c of enrichedById.values()) {
+    const mocks = Array.isArray(c.assignments) ? c.assignments : [];
+    mocks.forEach((m, i) => {
+      if (!m) return;
+      const districtId = m.districtId || districtIdFor({ schoolId: m.schoolId }) || null;
+      const direct = Number(m.direct) || 0;
+      const indirect = Number(m.indirect) || 0;
+      const fallback = Number(m.hoursPerWeek) || 0;
+      out.push({
+        key: 'm:' + c.id + ':' + (m.schoolId || 'x') + ':' + (m.startDate || '') + ':' + i,
+        _id: null,
+        source: 'mock',
+        contractorId: c.id,
+        contractorName: c.name || '',
+        spec: m.spec || c.spec || '',
+        schoolId: m.schoolId || null,
+        schoolName: schoolName(m.schoolId, m.school),
+        districtId,
+        districtName: districtName(districtId, m.district),
+        state: m.state || '',
+        direct: (direct || indirect) ? direct : fallback,
+        indirect,
+        indirectOverride: false,
+        payRate: null,
+        defaultPay: defaultPayFor(c),
+        startDate: m.startDate || '',
+        endDate: m.endDate || null,
+        status: m.status || 'active',
+        attachmentCount: 0,
+      });
+    });
+  }
+  return out;
+};
+
+// Hook form of the above. Subscribes to every store that can change a
+// row's name, hours, or money so the page re-renders on teammate edits:
+// assignments, the contractor catalog, contractor overrides (renames +
+// pay), spec settings (indirect ratio), district rate cards (bill), and
+// school / district overrides (renames).
+window.useAllAssignments = function useAllAssignments() {
+  const persisted = window.useAssignments();
+  const contractors = window.useContractors
+    ? window.useContractors()
+    : ((window.RCIS_DATA && window.RCIS_DATA.CONTRACTORS) || []);
+  const overrides = window.useContractorOverrides ? window.useContractorOverrides() : null;
+  const specSettings = window.useSpecSettings ? window.useSpecSettings() : null;
+  const rateCards = window.useDistrictRateCards ? window.useDistrictRateCards() : null;
+  const schoolOv = window.useSchoolOverrides ? window.useSchoolOverrides() : null;
+  const districtOv = window.useDistrictOverrides ? window.useDistrictOverrides() : null;
+  return React.useMemo(
+    () => window.allAssignmentRows(persisted, contractors, overrides || undefined),
+    [persisted, contractors, overrides, specSettings, rateCards, schoolOv, districtOv],
+  );
+};

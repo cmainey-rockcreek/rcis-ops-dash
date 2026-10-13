@@ -37,6 +37,7 @@ There are no ES modules, no imports/exports. Every file is an IIFE that attaches
 - Router: `window.useRoute`, `window.navigate`, `window.Link`
 - UI primitives: `window.OwnerAvatar`, `window.SpecChip`, `window.StatusPill`, `window.PrioDot`, `window.CapacityBar`, `window.WeekGrid`, `window.MiniSpark`, `window.Icon`
 - Theme: `window.RCIS_BRAND`, `window.RCIS_ThemeContext`, `window.useRCISTheme`, `window.specColor(code)`, `window.specName(code)`, `window.teamMember(id)`
+- Assignments across contractors: `window.allAssignmentRows(persisted, contractors, overridesMap)` (pure) and `window.useAllAssignments()` in `assignments-store.js` merge mock seeds + persisted rows into one shape for `/assignments` and the sidebar badge. `page-contractors.jsx` exports `window.AssignmentEditor` and `window.assignmentModalStyles` so `/assignments` opens the same editor. `window.downloadCSV(filename, header, rows)` in `shared.jsx` is the CSV helper.
 
 When adding a new shared helper, follow the same pattern (IIFE → `window.X = …`) rather than introducing imports.
 
@@ -52,6 +53,7 @@ Hash-based (`router.jsx`) — no server config required, works under any static 
 #/contractors[/:id] → ContractorsListPage / ContractorDetailPage
 #/schools[/:id]     → SchoolsListPage / SchoolDetailPage
 #/districts[/:id]   → DistrictsListPage / DistrictDetailPage
+#/assignments       → AssignmentsPage (every assignment, grouped by school)
 #/contacts[/:id]    → ContactsPage / ContactDetailPage
 #/admin             → AdminPage (team members + specialty settings)
 ```
