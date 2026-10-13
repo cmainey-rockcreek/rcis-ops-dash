@@ -8,25 +8,32 @@ same commit that ships it; when new work is found, it is added here.
 **Guiding priority:** get a mostly working prototype in front of the team
 before investing in integrations or deep polish.
 
-**Where we are (Oct 8, 2026):** the prototype is live at
-`https://rcis-dash.vercel.app` on the free Supabase tier and the team can
-start using it. Sign-up is invite-only (add the teammate on /admin, they
-create their account with that email) and sign-in is complete: email +
-password, "Forgot password?" recovery, "Change password" on /admin, and
-"Continue with Google" for Rock Creek Workspace accounts.
+**Where we are (Oct 13, 2026):** the prototype is live at
+`https://rcis-dash.vercel.app` on the free Supabase tier and the team is
+using it. Sign-up is invite-only (add the teammate on /admin, they create
+their account with that email) and sign-in is complete: email + password,
+"Forgot password?" recovery, "Change password" on /admin, and "Continue
+with Google" for Rock Creek Workspace accounts. Access control is enforced
+in RLS: an inactive teammate is refused every read and write, and only
+admins (`team_profiles.is_admin`) can invite or edit other profiles.
+Christo is the admin. `supabase/rollback-rls-active-admin.sql` undoes the
+policies in one paste if ever needed.
 
-Access control shipped Oct 8 and is applied to the live database. A
-teammate toggled inactive on /admin is refused every read and write by RLS
-and sees an "account inactive" screen until reactivated. Only admins
-(`team_profiles.is_admin`, toggled on /admin) can invite, cancel invites,
-edit other profiles, or flip Active / Admin, and nobody can change their own
-flags. Christo is the admin. The free-text role stays a display label. If it
-ever needs undoing, `supabase/rollback-rls-active-admin.sql` restores the old
-policies in one paste.
+The Assignments master page shipped Oct 13 (PR #3, live). `/assignments`
+lists every placement grouped by school under district, with a flat
+sortable table toggle, filters, totals, a show-completed chip, the same
+editor as the contractor page, and the app's first working CSV export.
+Owner ran the four-item done-checklist at localhost; code review at high
+effort found six items, four fixed, two deferred to Polish below. Not yet
+exercised: attachment upload and delete from that page, the CSV opening in
+Excel, and a saved row whose contractor was later deleted (listed under
+Polish).
 
 **Next:** the Content-Security-Policy + production React item below is the
-last piece of the security gate. After it comes the real data migration,
-then the items that depend on real data.
+last piece of the security gate. Decide in planning whether to keep Babel
+compiling in the browser (a looser CSP) or add a small pre-compile step (a
+strict one). After it comes the real data migration, then the items that
+depend on real data.
 
 ## What we are building
 
