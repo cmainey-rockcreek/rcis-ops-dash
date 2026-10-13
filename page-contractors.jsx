@@ -1557,7 +1557,7 @@
             <React.Fragment key={key}>
               <div onClick={onClick} style={{ ...baseRow, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {a.school || (a.districtName ? `${a.districtName} (district-wide)` : '—')}
+                  {a.school || (a.district ? `${a.district} (district-wide)` : '—')}
                 </span>
                 {attachCount > 0 && (
                   <span title={`${attachCount} attachment${attachCount === 1 ? '' : 's'}`}
@@ -2837,4 +2837,8 @@
 
   window.ContractorsListPage = ContractorsListPage;
   window.ContractorDetailPage = ContractorDetailPage;
+  // Shared with the /assignments master page so it can open the same
+  // editor instead of growing a second one.
+  window.AssignmentEditor = AssignmentEditor;
+  window.assignmentModalStyles = modalStyles;
 })();

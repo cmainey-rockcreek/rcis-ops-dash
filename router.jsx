@@ -8,6 +8,7 @@
 //   #/contractors      → contractors list
 //   #/contractors/c01  → contractor detail
 //   #/schools          → schools list
+//   #/assignments      → every assignment, grouped by school
 //
 // Hash routing avoids any server-side setup — the file works the same
 // opened locally, on a static host, or behind an auth proxy later.
@@ -37,6 +38,7 @@
     if (segs[0] === 'matchmaker') return { name: 'matchmaker', segs };
     if (segs[0] === 'renewals')  return { name: 'renewals', segs };
     if (segs[0] === 'financials') return { name: 'financials', segs };
+    if (segs[0] === 'assignments') return { name: 'assignments', segs };
     if (segs[0] === 'admin')     return { name: 'admin', segs };
     return { name: 'home', segs: [] };
   }

@@ -69,20 +69,6 @@ contractor. Depends on a monthly time-entries CSV import from the time
 tracker; build after that import exists. Fully scoped in
 `docs/financials-page-scope.md`.
 
-### Assignments master page
-
-A new `#/assignments` page that lists every assignment in one place so the
-team can see which schools have which contractors. Today a saved assignment
-is visible only on its contractor's page. Grouped by school (district-wide
-rows under their district) with a flat sortable table toggle; columns are
-contractor, direct / indirect hours, dates, and weekly gross margin (no
-rates); completed rows hidden behind a "Show completed" chip; click a saved
-row to open the existing assignment editor; "New assignment" picks a
-contractor first; "Export CSV" of the visible rows (first working CSV in
-the app). Scoped and approved Oct 9, 2026, build deferred by the owner.
-Full build brief in `docs/assignments-page-scope.md`. Includes a one-token
-fix for district-wide rows showing "—" on the contractor page.
-
 ### Next up — security gate, before real data migration
 
 Found in the Oct 2026 security pass. Invite-only sign-up, the profile
@@ -102,7 +88,8 @@ real therapist / school data replaces the mocks.
 ### After the real data migration
 
 - **Data export to CSV** — contractors, schools, districts, and contacts, from
-  the Admin page.
+  the Admin page. `window.downloadCSV` (shared.jsx) exists now; the three
+  placeholder "Export CSV" buttons on the list pages still have no handler.
 - **Read-only Supabase report access** — connect a read-only Supabase
   connector so reports can be pulled from live data (ad hoc, a live report
   page, or scheduled).
@@ -112,6 +99,25 @@ real therapist / school data replaces the mocks.
 
 ### Polish
 
+- **Assignments page — untested paths and watch-outs (shipped Oct 13,
+  2026).** Not yet exercised: uploading an attachment from `/assignments`,
+  deleting a saved assignment from `/assignments`, the exported CSV opening
+  in Excel, and a saved assignment whose contractor was later deleted (the
+  row still lists under the stored name with $0 default pay, so its margin
+  equals the full bill). Could break: the sidebar badge goes blank if any
+  of the seven stores it subscribes to fails to load (the shell still
+  renders); a district with no rate card and no specialty default bill
+  shows "—" per row and "N without a bill rate" in the header; the CSV
+  button is a browser download, which some browsers prompt for on first
+  use.
+- **PT specialty color is nearly invisible in dark mode.** `SpecChip` and
+  the initials avatar on `/assignments` use `specColor('PT')`, a navy close
+  to the dark card background. Pick a dark-safe color in
+  `RCIS_DATA.SPECIALTIES` or add a dark-mode variant in `specColor`.
+- **Dashboard revenue tile merges assignments inline.** `dashboard-calm.jsx`
+  builds its own mock + persisted assignment merge. Switch it to
+  `window.allAssignmentRows` so the home tile and `/assignments` cannot
+  disagree.
 - **Page-by-page polish pass.** Review each page for rough edges, broken
   states, and visual inconsistency. Log anything larger as a new item here.
 - **`schema.sql` is not fresh-database safe.** The invite / cancel-invite

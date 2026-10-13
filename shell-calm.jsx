@@ -430,6 +430,10 @@
     const renewals = window.useRenewals ? window.useRenewals() : [];
     const liveContractors = window.useContractors ? window.useContractors() : window.RCIS_DATA.CONTRACTORS;
     const contacts = window.useContacts ? window.useContacts() : [];
+    // Guarded like the other sidebar hooks so the shell still renders if
+    // the assignments store failed to load.
+    const allAssignments = window.useAllAssignments ? window.useAllAssignments() : [];
+    const activeAssignments = allAssignments.filter((a) => a.status === 'active').length;
     const renewalsBadge = React.useMemo(() => {
       if (!renewals.length) return null;
       const n = renewals.filter((r) => {
@@ -445,6 +449,7 @@
       { key: 'contractors', icon: 'user',   name: 'Contractors',  to: '/contractors', badge: String(liveContractors.length) },
       { key: 'contacts',    icon: 'user',   name: 'Contacts',     to: '/contacts',    badge: contacts.length ? String(contacts.length) : null },
       { key: 'districts',   icon: 'flag',   name: 'Districts',    to: '/districts',   badge: String(window.RCIS_DATA.DISTRICTS.length) },
+      { key: 'assignments', icon: 'school', name: 'Assignments',  to: '/assignments', badge: activeAssignments ? String(activeAssignments) : null },
       { key: 'matchmaker',  icon: 'cal',    name: 'Matchmaker',   to: '/matchmaker' },
       { key: 'board',       icon: 'list',   name: 'Tasks',        to: '/board' },
       { key: 'renewals',    icon: 'file',   name: 'Renewals',     to: '/renewals',    badge: renewalsBadge },

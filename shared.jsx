@@ -230,3 +230,26 @@ window.LINK_SCHEME_ERROR = 'Links must start with http://, https://, mailto: or 
 
 // Each artboard's "frozen" date — Friday, May 16 2025 (Fri morning vibe).
 window.RCIS_TODAY = 'Friday, May 16';
+
+// Download a CSV built from an array of rows. `header` is an array of
+// column labels; `rows` is an array of arrays in the same column order.
+// Cells containing commas, quotes or newlines are quoted (inner quotes
+// doubled), rows join with CRLF, and a UTF-8 BOM is prefixed so Excel
+// opens accented names correctly. First working CSV in the app — the
+// placeholder "Export CSV" buttons on the list pages can use this too.
+window.downloadCSV = function downloadCSV(filename, header, rows) {
+  const cell = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const lines = [header, ...(rows || [])].map((r) => (r || []).map(cell).join(','));
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'export.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
