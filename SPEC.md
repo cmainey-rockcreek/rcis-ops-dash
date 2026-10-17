@@ -76,6 +76,53 @@ contractor. Depends on a monthly time-entries CSV import from the time
 tracker; build after that import exists. Fully scoped in
 `docs/financials-page-scope.md`.
 
+### Finance visibility — Phase A drafted Oct 16, 2026
+
+Before more internal staff are invited, pay, bill, revenue and margin must
+be visible only to admins. Decided Oct 16: no new flag; Kathleen and Mark
+become admins. The money moves out of the shared tables into admin-only
+tables (`contractor_pay_rates`, `assignment_rates`, `gap_bill_rates`,
+`spec_financials`) so RLS and Realtime withhold it, and the UI hides every
+financial widget for everyone else. Fully scoped in
+`docs/finance-visibility-scope.md`.
+
+- **Phase A — schema. Applied to the live project Oct 17, 2026** (schema
+  via a Supabase migration named `finance_visibility_phase_a_schema`, then
+  the migrate; receipt 4/4/1/7, value-level mirror exact, impersonation
+  check: non-admin sees 0 rows in all five finance tables, admin sees all).
+  Two admins at apply time; flip the remaining one on /admin if not done.
+  `schema.sql` adds the tables,
+  triggers, realtime and admin-only policies and never moves or drops
+  data. Five guarded one-shot files do the data steps:
+  `migrate-finance-rates.sql`, `reset-finance-mirror.sql`,
+  `phase-b-live.sql`, `phase-c-drop-legacy-rates.sql`,
+  `rollback-finance-access.sql`. State lives in the table comment on
+  `spec_financials` (empty / timestamp / `LOCKED`). Owner steps, in order:
+  flip Kathleen and Mark to admin on /admin, paste `schema.sql` (from this
+  worktree, not `main`), paste the migrate and check its receipt, tell the
+  team that until deploy day non-admins see default-band bill figures,
+  cannot edit rate cards, and should not change any pay, bill or burden
+  figure. Decided Oct 17: after Phase B only admins can edit the
+  indirect-hours ratio (it lives on `/financials`); everyone still sees
+  the auto-fill it drives.
+- **Phase B — client.** New `finance-rates-store.js` (four maps, realtime,
+  `remove` for a cleared or 0 rate), stores stop reading **and sending**
+  the legacy keys, `useFinanceAccess()` gate, every financial widget hidden
+  for non-admins, `/financials` route and sidebar entry gated, pre-change
+  cache keys removed on boot. Localhost testing writes to the finance
+  tables, so deploy day order is: everyone stops editing rates → paste the
+  reset → paste the migrate → deploy → everyone reloads → paste
+  `phase-b-live.sql` (checks the mirror is exact, locks, blanks the legacy
+  copies, installs blanking triggers).
+- **Phase C — drop the legacy columns** a few days after Phase B is live:
+  paste `phase-c-drop-legacy-rates.sql` (refuses unless `LOCKED`). Same
+  commit: trim the `spec_settings` create table and seed insert in
+  `schema.sql`, remove the legacy `pay_rate` / `bill_rate` lines from the
+  other four create tables, and update CLAUDE.md and the code comments that
+  still name `spec_settings.default_bill_low`. Precondition: the live
+  client sends none of the legacy keys in write bodies to any of the five
+  tables (done-checklist item 4 in the brief).
+
 ### Next up — security gate, before real data migration
 
 Found in the Oct 2026 security pass. Invite-only sign-up, the profile
@@ -149,19 +196,22 @@ RCIS data (~50 therapists, 250+ schools). Fully specified in
 `docs/data-migration-plan.md` — source-of-truth map, anti-corruption rules, and
 the migration sequence. Not yet scheduled; will get its own brief.
 
+- **Real pay rates go into `contractor_pay_rates`, never a static file.**
+  Mock pay today is generated in `data-contractors.js`, which Vercel serves
+  to anyone with the URL. Once finance visibility ships, the finance-only
+  tables are the only acceptable home for real compensation data.
+
 ---
 
 ## Open questions
 
 - **"Today" source of truth.** `RCIS_TODAY` is frozen at a mock date while some
   date math uses the real current date. Pick one and apply it consistently.
-- **Data-level permissions.** The admin flag gates team management only.
+- **Non-financial data permissions.** Finance visibility is scoped above.
   Every active teammate still has full read/write on contractors, schools,
-  districts, tasks, gaps, renewals, financial settings, and attachments.
-  Decide whether non-admins should ever be limited (pay / bill rates, the
-  Financials page, specialty settings are the likely candidates). That
-  would be a second RLS pass plus matching UI gating. The free-text `role`
-  stays a display label either way.
+  districts, tasks, gaps, renewals and attachments. Decide later whether
+  any of that should be limited too. The free-text `role` stays a display
+  label either way.
 
 ## Future direction — not urgent
 
