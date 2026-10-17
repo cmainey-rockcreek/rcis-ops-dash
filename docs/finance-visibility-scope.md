@@ -6,8 +6,9 @@ is opened to more internal staff (SPEC.md "Finance visibility"). Owner
 decisions confirmed Oct 16; Phase A (schema and the one-shot SQL files)
 drafted and reviewed the same day and applied to the live project Oct 17
 (see SPEC.md for the receipt). Phase B (client) built, checklisted and
-deployed Oct 17; `phase-b-live.sql` pasted the same day. Phase C is the
-only step left. This is the build brief._
+deployed Oct 17; `phase-b-live.sql` pasted the same day; Phase C (legacy
+columns dropped) also Oct 17. The rollout is complete; this is the record
+and the rollback reference._
 
 ---
 

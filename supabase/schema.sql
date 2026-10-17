@@ -50,8 +50,9 @@ alter table public.team_profiles add column if not exists is_admin boolean not n
 
 -- ─── coverage_gaps ───────────────────────────────────────────────────────
 -- Tracked needs (school-tied or district-wide). Drive the home page widget
--- and the Matchmaker page. Bill rate, modality, urgency, attachments and
--- notes all live on the row; comments live on gap_comments below.
+-- and the Matchmaker page. Modality, urgency, attachments and notes live on
+-- the row; comments live on gap_comments below; a per-gap bill-rate
+-- override is admin-only and lives in gap_bill_rates.
 create table if not exists public.coverage_gaps (
   id             text primary key,
   scope          text not null default 'school' check (scope in ('school','district')),
@@ -64,7 +65,6 @@ create table if not exists public.coverage_gaps (
   hours          numeric not null,
   modality       text not null default 'onsite' check (modality in ('onsite','tele','either')),
   priority       text not null default 'medium' check (priority in ('urgent','high','medium','low')),
-  bill_rate      numeric,
   note           text default '',
   status         text not null default 'open' check (status in ('open','filled','closed')),
   attachments    jsonb not null default '[]',
@@ -124,8 +124,8 @@ create index if not exists renewals_district_idx    on public.renewals (district
 -- ─── assignments ─────────────────────────────────────────────────────────
 -- Contractor placements at schools / districts. Mock seed assignments still
 -- live in data-contractors.js and are merged on read; user-created ones land
--- here. pay_rate and bill_rate are per-assignment so they can override the
--- contractor's defaults from contractor_overrides.
+-- here. A per-assignment pay override is admin-only and lives in
+-- assignment_rates; bill rate is derived from the district rate card.
 create table if not exists public.assignments (
   id              text primary key,
   contractor_id   text not null,
@@ -138,8 +138,6 @@ create table if not exists public.assignments (
   direct_hours    numeric not null default 0,
   indirect_hours  numeric not null default 0,
   indirect_override boolean default false,
-  pay_rate        numeric,
-  bill_rate       numeric,
   start_date      date,
   end_date        date,
   status          text not null default 'active' check (status in ('active','completed')),
@@ -209,8 +207,9 @@ create index if not exists schedule_slots_date_idx             on public.schedul
 
 -- ─── contractor_overrides ────────────────────────────────────────────────
 -- Per-contractor edits that override the mock defaults from data-contractors.js.
--- Stores the editable pay/bill rate plus the editable weekly schedule
--- (5 weekdays × 4 blocks: AM/Mid/PM/Late, each 0–3 load).
+-- Stores the editable name, contact fields and weekly schedule (5 weekdays ×
+-- 4 blocks: AM/Mid/PM/Late, each 0–3 load). Pay is admin-only and lives in
+-- contractor_pay_rates.
 -- ─── school_overrides + district_overrides ──────────────────────────────
 -- Per-school and per-district edits on top of the mock defaults in
 -- data.js / data-schools.js. Mirrors contractor_overrides pattern.
@@ -232,8 +231,6 @@ create table if not exists public.district_overrides (
 create table if not exists public.contractor_overrides (
   contractor_id  text primary key,
   name           text,
-  pay_rate       numeric,
-  bill_rate      numeric,
   schedule       jsonb,
   email          text,
   phone          text,
@@ -303,8 +300,8 @@ create table if not exists public.entity_notes (
 -- User-created contractors that live alongside the in-file mock catalog
 -- (data-contractors.js). The store merges these into window.RCIS_DATA.CONTRACTORS
 -- on read so existing UI keeps working unchanged. Editable fields still flow
--- through `contractor_overrides` (rates, schedule, contact) — this table
--- only stores the creation defaults + identity.
+-- through `contractor_overrides` (schedule, contact) and pay through
+-- `contractor_pay_rates` — this table only stores identity + defaults.
 create table if not exists public.contractors (
   id            text primary key,
   name          text not null,
@@ -319,8 +316,6 @@ create table if not exists public.contractors (
   city          text,
   npi           text,
   hire_date     date,
-  pay_rate      numeric,
-  bill_rate     numeric,
   created_by    uuid references public.team_profiles(id) on delete set null,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
@@ -329,32 +324,20 @@ create index if not exists contractors_spec_idx   on public.contractors (spec);
 create index if not exists contractors_status_idx on public.contractors (status);
 
 -- ─── spec_settings ───────────────────────────────────────────────────────
--- Per-specialty knobs: indirect-hours ratio (auto-derive on assignments),
--- burden $/hr (taxes + insurance + admin overhead, subtracted from Net
--- Margin), and rate-band seed defaults. Editable on /admin. One row per
--- spec code from RCIS_DATA.SPECIALTIES.
+-- Per-specialty indirect-hours ratio (auto-derive on assignments), readable
+-- by every active member. Burden $/hr and the default pay/bill bands are
+-- admin-only and live in spec_financials below. Editable on /financials.
+-- One row per spec code from RCIS_DATA.SPECIALTIES.
 create table if not exists public.spec_settings (
   spec_code                  text primary key,
   indirect_ratio             numeric not null default 0.25,
-  burden_per_billable_hour   numeric not null default 0,
-  default_pay_low            numeric,
-  default_pay_high           numeric,
-  default_bill_low           numeric,
-  default_bill_high          numeric,
   updated_at                 timestamptz not null default now()
 );
 
-insert into public.spec_settings
-  (spec_code, indirect_ratio, burden_per_billable_hour,
-   default_pay_low, default_pay_high, default_bill_low, default_bill_high)
+insert into public.spec_settings (spec_code, indirect_ratio)
 values
-  ('SLP',  0.25, 0, 58, 78,  88, 115),
-  ('OT',   0.25, 0, 60, 80,  90, 120),
-  ('PT',   0.25, 0, 62, 82,  92, 125),
-  ('PSY',  0.25, 0, 68, 92, 100, 145),
-  ('BCBA', 0.25, 0, 65, 88,  95, 135),
-  ('MH',   0.25, 0, 55, 75,  85, 110),
-  ('SPED', 0.25, 0, 50, 70,  78, 105)
+  ('SLP', 0.25), ('OT', 0.25), ('PT', 0.25), ('PSY', 0.25),
+  ('BCBA', 0.25), ('MH', 0.25), ('SPED', 0.25)
 on conflict (spec_code) do nothing;
 
 -- ─── district_rate_cards ─────────────────────────────────────────────────
@@ -363,8 +346,9 @@ on conflict (spec_code) do nothing;
 -- varies by district. Each assignment derives its bill rate from this card
 -- via its district + the contractor's specialty (looked up, not stored on
 -- the assignment). When no row exists for a (district, spec) pair,
--- financials.js falls back to spec_settings.default_bill_low so prototype
--- numbers don't collapse to $0 before each district is filled in.
+-- financials.js falls back to spec_financials.default_bill_low so prototype
+-- numbers don't collapse to $0 before each district is filled in. Admin-only
+-- (policy below).
 create table if not exists public.district_rate_cards (
   district_id  text not null,
   spec_code    text not null,
@@ -374,12 +358,6 @@ create table if not exists public.district_rate_cards (
 );
 create index if not exists district_rate_cards_district_idx on public.district_rate_cards (district_id);
 
--- Bill rate is now derived. Drop the contractor-level and assignment-level
--- bill_rate columns wherever they exist — the rate card is the source.
-alter table public.contractors          drop column if exists bill_rate;
-alter table public.contractor_overrides drop column if exists bill_rate;
-alter table public.assignments          drop column if exists bill_rate;
-
 -- ─── Finance tables (admin-only) ─────────────────────────────────────────
 -- Pay, bill, burden and rate-band data is readable and writable only by
 -- admins (`is_admin()`), so non-admin teammates never receive it: RLS
@@ -387,31 +365,18 @@ alter table public.assignments          drop column if exists bill_rate;
 -- the shared tables because RLS is per row, not per column, and Realtime
 -- delivers whole rows — a masked column would still leak through it.
 --
--- Rollout (see docs/finance-visibility-scope.md). This file only ever adds
--- structure and sets policies; it never moves or drops data, so it is safe
--- to re-paste at any point of the rollout. The data steps are one-shot
--- files in this folder, each guarded by the state of the database:
---   Phase A  paste this file, then migrate-finance-rates.sql (mirrors the
---            legacy columns into these tables). The legacy columns
---            (contractors.pay_rate, contractor_overrides.pay_rate,
---            assignments.pay_rate, coverage_gaps.bill_rate, the five
---            financial columns of spec_settings) stay so the live client
---            keeps working. Testing the Phase B client at localhost writes
---            to these tables; reset-finance-mirror.sql throws that away
---            (allowed only while the legacy columns are the truth).
---   Phase B  deploy day: reset, migrate, deploy, everyone reloads, then
---            phase-b-live.sql: checks the mirror is exact, marks Phase B
---            live, blanks the legacy copies and installs triggers that keep
---            them blank against stale old-client tabs.
---   Phase C  paste phase-c-drop-legacy-rates.sql to drop the legacy
---            columns; in the same commit trim the spec_settings `create
---            table` and seed below (the file says exactly how).
--- Undo at any point: rollback-finance-access.sql.
+-- Rolled out Oct 17, 2026 in three phases (docs/finance-visibility-scope.md):
+-- the tables and policies here, the client switch, then the drop of the
+-- legacy money columns from the shared tables. All three are complete on
+-- the live project; the one-shot files in this folder (migrate, reset,
+-- phase-b-live, phase-c-drop-legacy-rates, rollback) are kept for the
+-- record and for a fresh project. This file only ever adds structure and
+-- sets policies; it never moves or drops data.
 --
--- State marker: the table comment on spec_financials. Empty = migrate has
--- not run; a timestamp = last migrate run; "LOCKED …" = Phase B live.
--- Nothing in this file may set that comment, and nobody should edit it in
--- the Supabase Table Editor (it shows as the table "description").
+-- State marker: the table comment on spec_financials ("LOCKED …" since
+-- Oct 17, 2026). The one-shot files read it; nothing in this file may set
+-- it, and nobody should edit it in the Supabase Table Editor (it shows as
+-- the table "description").
 --
 -- NOT NULL on the three rate columns is deliberate: a missing row means
 -- "no rate set". The client clears a rate by deleting the row, never by
@@ -492,11 +457,6 @@ values
   ('MH',   0, 55, 75,  85, 110, '2000-01-01'),
   ('SPED', 0, 50, 70,  78, 105, '2000-01-01')
 on conflict (spec_code) do nothing;
-
--- Phase C (dropping the legacy columns) lives in
--- phase-c-drop-legacy-rates.sql, not here, so that re-pasting this file
--- can never destroy data. Until Phase C runs, the legacy columns above
--- still exist: blank after phase-b-live.sql, populated before it.
 
 -- ─── Auto-update updated_at on row updates ────────────────────────────────
 create or replace function public.touch_updated_at()
