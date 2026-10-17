@@ -39,11 +39,15 @@ window.ContractorFinancials = (() => {
     return Number.isFinite(n) ? n : 0;
   }
   // Resolve a row's bill rate from the district rate card, in order:
-  //   1. a.billRate              (legacy per-row override, going away)
+  //   1. a.billRate              (per-gap override from gap_bill_rates, when
+  //                               a caller attaches it to the row)
   //   2. rateCardFor(districtId, spec)
-  //   3. defaultBillFor(spec)    (spec_settings.default_bill_low — keeps
-  //                               prototype numbers from collapsing to $0)
+  //   3. defaultBillFor(spec)    (spec_financials.default_bill_low via the
+  //                               finance store — keeps prototype numbers
+  //                               from collapsing to $0)
   //   4. defaults.bill           (transitional — most callers will drop this)
+  // Every rate source above is admin-only (finance-rates-store.js); for a
+  // non-admin they all answer null / 0 and the UI hides the result.
   function effectiveBill(a, defBill, defSpec) {
     if (a && a.billRate != null && Number.isFinite(Number(a.billRate))) {
       return Number(a.billRate);

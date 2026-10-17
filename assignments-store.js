@@ -3,7 +3,10 @@
 // Same realtime + cold-cache pattern as RenewalsStore.
 
 window.AssignmentsStore = (() => {
-  const CACHE_KEY = 'rcis.assignments.cache.v1';
+  // v2: rows no longer carry pay_rate (finance visibility, Oct 2026). The
+  // v1 cache held pay for every teammate who ever loaded the page.
+  const CACHE_KEY = 'rcis.assignments.cache.v2';
+  try { localStorage.removeItem('rcis.assignments.cache.v1'); } catch (e) {}
   const TABLE = 'assignments';
 
   function uid() {
@@ -41,7 +44,6 @@ window.AssignmentsStore = (() => {
       directHours: Number(r.direct_hours) || 0,
       indirectHours: Number(r.indirect_hours) || 0,
       indirectOverride: !!r.indirect_override,
-      payRate: r.pay_rate != null ? Number(r.pay_rate) : null,
       startDate: r.start_date || null,
       endDate: r.end_date || null,
       status: r.status || 'active',
@@ -67,7 +69,6 @@ window.AssignmentsStore = (() => {
       direct_hours: a.directHours || 0,
       indirect_hours: a.indirectHours || 0,
       indirect_override: !!a.indirectOverride,
-      pay_rate: a.payRate != null ? a.payRate : null,
       start_date: a.startDate || null,
       end_date: a.endDate || null,
       status: a.status || 'active',
@@ -151,7 +152,6 @@ window.AssignmentsStore = (() => {
         districtId: null, districtName: '',
         spec: '',
         directHours: 0, indirectHours: 0, indirectOverride: false,
-        payRate: null,
         startDate: null, endDate: null,
         status: 'active', note: '',
         attachments: [],
@@ -161,6 +161,10 @@ window.AssignmentsStore = (() => {
         source: 'supabase',
         ...partial,
       };
+      // Pay lives in the admin-only assignment_rates table, never on this
+      // row. Pull it off before the insert; written after the row exists.
+      const payRate = a.payRate;
+      delete a.payRate;
       // If indirect wasn't overridden, derive it from direct × per-spec ratio.
       if (!a.indirectOverride) {
         a.indirectHours = autoIndirect(a.directHours, a.spec);
@@ -187,13 +191,25 @@ window.AssignmentsStore = (() => {
         setState(state.filter((x) => x.id !== a.id));
         return null;
       }
+      // A new row has no rate to clear, so only a real value is written.
+      if (payRate != null && window.FinanceRatesStore) {
+        await window.FinanceRatesStore.setAssignmentPay(a.id, payRate);
+      }
       return a;
     },
 
     async update(id, patch) {
       const existing = state.find((a) => a.id === id);
       if (!existing) return;
+      // Pay is admin-only and lives in assignment_rates; route it there and
+      // keep it off the shared row.
+      if (patch && Object.prototype.hasOwnProperty.call(patch, 'payRate')) {
+        const { payRate, ...rest } = patch;
+        patch = rest;
+        if (window.FinanceRatesStore) window.FinanceRatesStore.setAssignmentPay(id, payRate);
+      }
       const next = { ...existing, ...patch, updatedAt: Date.now() };
+      delete next.payRate;
       // Re-derive indirect from direct unless user has overridden.
       if (!next.indirectOverride) {
         next.indirectHours = autoIndirect(next.directHours, next.spec);
@@ -219,6 +235,9 @@ window.AssignmentsStore = (() => {
 
     async remove(id) {
       setState(state.filter((a) => a.id !== id));
+      // The DB cascades assignment_rates; drop the local copy too so the
+      // margin column does not show a stale value until realtime catches up.
+      if (window.FinanceRatesStore) window.FinanceRatesStore.setAssignmentPay(id, null);
       const { error } = await window.sb.from(TABLE).delete().eq('id', id);
       if (error) console.warn('assignments.remove', error);
     },
@@ -253,6 +272,8 @@ window.useContractorAssignments = function useContractorAssignments(c) {
   // numbers (effectiveBill reads window.rateCardFor at call time, but
   // consumers only re-run when this array's identity changes).
   const rateCards = window.useDistrictRateCards ? window.useDistrictRateCards() : null;
+  // Pay overrides live in the admin-only finance store.
+  const finance = window.useFinanceRates ? window.useFinanceRates() : null;
   return React.useMemo(() => {
     const schools = (window.RCIS_DATA && window.RCIS_DATA.SCHOOLS) || [];
     const lookupDistrict = (schoolId) => {
@@ -289,7 +310,7 @@ window.useContractorAssignments = function useContractorAssignments(c) {
         hoursPerWeek: direct + indirect,
         direct, indirect,
         indirectOverride: a.indirectOverride,
-        payRate: a.payRate,
+        payRate: window.assignmentPayFor ? window.assignmentPayFor(a.id) : null,
         status: a.status || 'active',
         spec: a.spec || '',
         attachments: Array.isArray(a.attachments) ? a.attachments : [],
@@ -298,7 +319,7 @@ window.useContractorAssignments = function useContractorAssignments(c) {
       };
     });
     return [...real, ...mock];
-  }, [c, persisted, specSettings, rateCards]);
+  }, [c, persisted, specSettings, rateCards, finance]);
 };
 
 // Live "booked hours this week" for a contractor: sums active mock + active
@@ -387,8 +408,12 @@ window.allAssignmentRows = function allAssignmentRows(persisted, contractors, ov
     const d = id ? districtById.get(id) : null;
     return (d && d.name) || fallback || '';
   };
-  const defaultPayFor = (c) => (c && c.rates && Number.isFinite(Number(c.rates.hourly)))
-    ? Number(c.rates.hourly) : 0;
+  // Pay comes from the admin-only finance store (null for non-admins).
+  const defaultPayFor = (c) => {
+    const v = c && window.contractorPayFor ? window.contractorPayFor(c) : null;
+    return Number.isFinite(Number(v)) ? Number(v) : 0;
+  };
+  const payFor = (id) => (window.assignmentPayFor ? window.assignmentPayFor(id) : null);
   const autoIndirect = window.AssignmentsStore && window.AssignmentsStore.autoIndirect
     ? window.AssignmentsStore.autoIndirect : (() => 0);
 
@@ -416,7 +441,7 @@ window.allAssignmentRows = function allAssignmentRows(persisted, contractors, ov
       state: '',
       direct, indirect,
       indirectOverride: !!a.indirectOverride,
-      payRate: a.payRate != null ? Number(a.payRate) : null,
+      payRate: payFor(a.id),
       defaultPay: defaultPayFor(c),
       startDate: a.startDate || '',
       endDate: a.endDate || null,
@@ -475,8 +500,9 @@ window.useAllAssignments = function useAllAssignments() {
   const rateCards = window.useDistrictRateCards ? window.useDistrictRateCards() : null;
   const schoolOv = window.useSchoolOverrides ? window.useSchoolOverrides() : null;
   const districtOv = window.useDistrictOverrides ? window.useDistrictOverrides() : null;
+  const finance = window.useFinanceRates ? window.useFinanceRates() : null;
   return React.useMemo(
     () => window.allAssignmentRows(persisted, contractors, overrides || undefined),
-    [persisted, contractors, overrides, specSettings, rateCards, schoolOv, districtOv],
+    [persisted, contractors, overrides, specSettings, rateCards, schoolOv, districtOv, finance],
   );
 };

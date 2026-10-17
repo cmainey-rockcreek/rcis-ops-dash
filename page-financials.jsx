@@ -22,6 +22,22 @@
   }
 
   function FinancialsContent({ pal }) {
+    // Admin-only. Render nothing until the profile has loaded (no flash),
+    // then a short notice for non-admins.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    if (!finance.ready) return null;
+    if (!finance.canView) {
+      return (
+        <div style={{ flex: 1, padding: '40px 24px', color: pal.textSoft }}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: pal.text }}>Financials</div>
+          <div style={{ fontSize: 13, marginTop: 8 }}>
+            This page is not available to your account. Pay, bill and margin
+            figures are visible to admins only.
+          </div>
+          <window.Link to="/" style={{ color: pal.accent, fontWeight: 500, marginTop: 12, display: 'inline-block' }}>← Back to Home</window.Link>
+        </div>
+      );
+    }
     return (
       <div style={{
         flex: 1, padding: '20px 24px',
@@ -47,6 +63,7 @@
     // Subscribe so changing a per-spec burden or indirect ratio in the
     // Specialty Settings card below re-derives the calculator output live.
     if (window.useSpecSettings) window.useSpecSettings();
+    if (window.useFinanceRates) window.useFinanceRates();
 
     const SPECS = (window.RCIS_DATA && window.RCIS_DATA.SPECIALTIES) || [];
     const F = window.ContractorFinancials;
@@ -321,10 +338,15 @@
   // profile, district profile + Revenue card, Matchmaker shortlist, and
   // the calculator above).
   function SpecialtySettingsSection({ pal }) {
+    // Ratio rows come from spec_settings (every teammate); burden and bands
+    // from the admin-only spec_financials via the finance store. The two
+    // tables are written separately: SpecSettingsStore.upsert forwards the
+    // financial keys to FinanceRatesStore.upsertSpecFinancials.
     const settings = window.useSpecSettings ? window.useSpecSettings() : {};
+    const finance  = window.useFinanceRates ? window.useFinanceRates() : { spec: {} };
     const SPECS = (window.RCIS_DATA && window.RCIS_DATA.SPECIALTIES) || [];
     const DEFAULT_RATIO  = (window.SpecSettingsStore && window.SpecSettingsStore.DEFAULT_INDIRECT_RATIO) || 0.25;
-    const DEFAULT_BURDEN = (window.SpecSettingsStore && window.SpecSettingsStore.DEFAULT_BURDEN) || 0;
+    const DEFAULT_BURDEN = (window.FinanceRatesStore && window.FinanceRatesStore.DEFAULT_BURDEN) || 0;
 
     return (
       <div style={{
@@ -369,8 +391,9 @@
 
         {SPECS.map((sp) => {
           const s = settings[sp.code] || {};
+          const f = (finance.spec && finance.spec[sp.code]) || {};
           const ratio  = s.indirectRatio          != null ? s.indirectRatio          : DEFAULT_RATIO;
-          const burden = s.burdenPerBillableHour  != null ? s.burdenPerBillableHour  : DEFAULT_BURDEN;
+          const burden = f.burdenPerBillableHour  != null ? f.burdenPerBillableHour  : DEFAULT_BURDEN;
           return (
             <div key={sp.code} style={{
               display: 'grid',

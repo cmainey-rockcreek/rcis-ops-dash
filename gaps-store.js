@@ -5,7 +5,9 @@
 // modality, urgency, attachments, and posted-at all live on the row.
 
 window.GapsStore = (() => {
-  const CACHE_KEY = 'rcis.coverage_gaps.cache.v1';
+  // v2: rows no longer carry bill_rate (finance visibility, Oct 2026).
+  const CACHE_KEY = 'rcis.coverage_gaps.cache.v2';
+  try { localStorage.removeItem('rcis.coverage_gaps.cache.v1'); } catch (e) {}
   const TABLE = 'coverage_gaps';
 
   function uid() {
@@ -25,7 +27,6 @@ window.GapsStore = (() => {
       hours: Number(r.hours) || 0,
       modality: r.modality || 'onsite',
       priority: r.priority || 'medium',
-      billRate: r.bill_rate != null ? Number(r.bill_rate) : null,
       note: r.note || '',
       status: r.status || 'open',
       attachments: r.attachments || [],
@@ -48,7 +49,6 @@ window.GapsStore = (() => {
       hours: g.hours,
       modality: g.modality || 'onsite',
       priority: g.priority || 'medium',
-      bill_rate: g.billRate != null ? g.billRate : null,
       note: g.note || '',
       status: g.status || 'open',
       attachments: g.attachments || [],
@@ -127,13 +127,17 @@ window.GapsStore = (() => {
         state: '', spec: '',
         hours: 0,
         modality: 'onsite', priority: 'medium',
-        billRate: null, note: '', status: 'open',
+        note: '', status: 'open',
         attachments: [],
         postedAt: now,
         createdBy: current ? current.id : null,
         createdAt: now, updatedAt: now,
         ...partial,
       };
+      // A per-gap bill override is admin-only and lives in gap_bill_rates,
+      // never on this row. Written after the row exists.
+      const billRate = gap.billRate;
+      delete gap.billRate;
       setState([gap, ...state]);
       const row = toRow(gap);
       const { error } = await window.sb.from(TABLE).insert(row);
@@ -142,13 +146,24 @@ window.GapsStore = (() => {
         setState(state.filter((g) => g.id !== gap.id));
         return null;
       }
+      // A new row has no override to clear, so only a real value is written.
+      if (billRate != null && window.FinanceRatesStore) {
+        await window.FinanceRatesStore.setGapBill(gap.id, billRate);
+      }
       return gap;
     },
 
     async update(id, patch) {
       const existing = state.find((g) => g.id === id);
       if (!existing) return;
+      if (patch && Object.prototype.hasOwnProperty.call(patch, 'billRate')) {
+        const { billRate, ...rest } = patch;
+        patch = rest;
+        if (window.FinanceRatesStore) window.FinanceRatesStore.setGapBill(id, billRate);
+      }
+      if (Object.keys(patch).length === 0) return;
       const next = { ...existing, ...patch, updatedAt: Date.now() };
+      delete next.billRate;
       setState(state.map((g) => g.id === id ? next : g));
       const row = toRow(next);
       delete row.id;
@@ -170,8 +185,14 @@ window.GapsStore = (() => {
   };
 })();
 
+// Gaps with their admin-only bill override attached (null for everyone
+// else, and for gaps without one). Pages keep reading `g.billRate`.
 window.useCoverageGaps = function useCoverageGaps() {
   const [s, setS] = React.useState(window.GapsStore.get());
   React.useEffect(() => window.GapsStore.subscribe(setS), []);
-  return s;
+  const finance = window.useFinanceRates ? window.useFinanceRates() : null;
+  return React.useMemo(
+    () => s.map((g) => ({ ...g, billRate: window.gapBillFor ? window.gapBillFor(g.id) : null })),
+    [s, finance],
+  );
 };

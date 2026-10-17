@@ -26,8 +26,11 @@
     );
   }
 
+  // Last 110px column is weekly margin, admins only.
   const GROUPED_COLS = '2.2fr 70px 80px 95px 95px 110px';
   const FLAT_COLS    = '1.7fr 1.7fr 70px 80px 95px 95px 110px';
+  const GROUPED_COLS_NO_MONEY = '2.2fr 70px 80px 95px 95px';
+  const FLAT_COLS_NO_MONEY    = '1.7fr 1.7fr 70px 80px 95px 95px';
 
   function AssignmentsList({ pal }) {
     const rows = window.useAllAssignments ? window.useAllAssignments() : [];
@@ -42,6 +45,9 @@
 
     const F = window.ContractorFinancials;
     const fmt = (F && F.formatUSD) || ((n) => `$${Math.round(Number(n) || 0).toLocaleString()}`);
+    // Finance visibility: the margin column is admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
 
     const districts = window.useDistrictsView
       ? window.useDistrictsView((window.RCIS_DATA && window.RCIS_DATA.DISTRICTS) || [])
@@ -181,21 +187,26 @@
     // ── CSV of exactly what is on screen, in display order.
     const exportCSV = () => {
       if (!window.downloadCSV) return;
-      const header = ['Contractor', 'Specialty', 'School', 'District', 'Scope',
-        'Direct h', 'Indirect h', 'Weekly h', 'Start', 'End', 'Status',
-        'Weekly margin', 'Source'];
+      // Header and rows are built from the same column list so the margin
+      // column (admins only) can never be present in one and not the other.
+      const columns = [
+        ['Contractor', (r) => r.contractorName],
+        ['Specialty',  (r) => r.spec],
+        ['School',     (r) => (r.schoolId ? r.schoolName : '')],
+        ['District',   (r) => r.districtName || ''],
+        ['Scope',      (r) => (r.schoolId ? 'school' : 'district-wide')],
+        ['Direct h',   (r) => r.direct],
+        ['Indirect h', (r) => r.indirect],
+        ['Weekly h',   (r) => r.weeklyHours],
+        ['Start',      (r) => r.startDate || ''],
+        ['End',        (r) => r.endDate || ''],
+        ['Status',     (r) => r.status],
+        ...(canView ? [['Weekly margin', (r) => (r.weeklyMargin == null ? '' : Math.round(r.weeklyMargin))]] : []),
+        ['Source',     (r) => (r.source === 'mock' ? 'seed' : 'supabase')],
+      ];
+      const header = columns.map((c) => c[0]);
       const order = view === 'grouped' ? groups.flatMap((g) => g.rows) : sortedFlat;
-      const data = order.map((r) => [
-        r.contractorName, r.spec,
-        r.schoolId ? r.schoolName : '',
-        r.districtName || '',
-        r.schoolId ? 'school' : 'district-wide',
-        r.direct, r.indirect, r.weeklyHours,
-        r.startDate || '', r.endDate || '',
-        r.status,
-        r.weeklyMargin == null ? '' : Math.round(r.weeklyMargin),
-        r.source === 'mock' ? 'seed' : 'supabase',
-      ]);
+      const data = order.map((r) => columns.map((c) => c[1](r)));
       window.downloadCSV(`assignments-${new Date().toISOString().slice(0, 10)}.csv`, header, data);
     };
 
@@ -203,7 +214,9 @@
       { key: 'all', label: 'All' },
       ...((window.RCIS_DATA && window.RCIS_DATA.SPECIALTIES) || []).map((s) => ({ key: s.code, label: s.code, color: s.color })),
     ];
-    const cols = view === 'grouped' ? GROUPED_COLS : FLAT_COLS;
+    const cols = view === 'grouped'
+      ? (canView ? GROUPED_COLS : GROUPED_COLS_NO_MONEY)
+      : (canView ? FLAT_COLS : FLAT_COLS_NO_MONEY);
     // Count completed rows that the *other* filters would show, so the chip
     // never promises rows that toggling it won't reveal.
     const completedCount = React.useMemo(() => {
@@ -227,8 +240,9 @@
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexShrink: 0 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: pal.text, letterSpacing: -0.3 }}>Assignments</h1>
           <span style={{ fontSize: 13, color: pal.textSoft, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-            {totals.count} active · {formatHours(totals.hours)} h/week · {fmt(totals.margin)} weekly margin
-            {totals.unpriced > 0 && (
+            {totals.count} active · {formatHours(totals.hours)} h/week
+            {canView && <>{' '}· {fmt(totals.margin)} weekly margin</>}
+            {canView && totals.unpriced > 0 && (
               <span title="These rows have no district rate card and no specialty default bill rate yet, so their margin is not included.">
                 {' '}· {totals.unpriced} without a bill rate
               </span>
@@ -332,7 +346,7 @@
                 <span style={{ textAlign: 'right' }}>Indirect</span>
                 <span style={{ textAlign: 'right' }}>Start</span>
                 <span style={{ textAlign: 'right' }}>End</span>
-                <span style={{ textAlign: 'right' }}>Wk margin</span>
+                {canView && <span style={{ textAlign: 'right' }}>Wk margin</span>}
               </>
             ) : (
               <>
@@ -342,7 +356,7 @@
                 <SortHeader pal={pal} sort={sort} setSort={setSort} k="indirect"   label="Indirect" right />
                 <SortHeader pal={pal} sort={sort} setSort={setSort} k="start"      label="Start" right />
                 <SortHeader pal={pal} sort={sort} setSort={setSort} k="end"        label="End" right />
-                <SortHeader pal={pal} sort={sort} setSort={setSort} k="margin"     label="Wk margin" right />
+                {canView && <SortHeader pal={pal} sort={sort} setSort={setSort} k="margin"     label="Wk margin" right />}
               </>
             )}
           </div>
@@ -373,14 +387,14 @@
                     <span style={{ fontVariantNumeric: 'tabular-nums' }}>{g.rows.length}</span>
                   </div>
                   {g.rows.map((r) => (
-                    <AssignmentRow key={r.key} r={r} pal={pal} cols={cols} flat={false} fmt={fmt} onClick={openEdit} />
+                    <AssignmentRow key={r.key} r={r} pal={pal} cols={cols} flat={false} fmt={fmt} canView={canView} onClick={openEdit} />
                   ))}
                   <div style={{ height: 6 }} />
                 </div>
               ))
             ) : (
               sortedFlat.map((r) => (
-                <AssignmentRow key={r.key} r={r} pal={pal} cols={cols} flat fmt={fmt} onClick={openEdit} />
+                <AssignmentRow key={r.key} r={r} pal={pal} cols={cols} flat fmt={fmt} canView={canView} onClick={openEdit} />
               ))
             )}
           </div>
@@ -404,7 +418,7 @@
   }
 
   // ─── One row (both views) ─────────────────────────────────────────────────
-  function AssignmentRow({ r, pal, cols, flat, fmt, onClick }) {
+  function AssignmentRow({ r, pal, cols, flat, fmt, canView, onClick }) {
     const editable = r.source === 'supabase' && !!r._id;
     const dim = r.status !== 'active';
     const [hover, setHover] = React.useState(false);
@@ -463,9 +477,11 @@
         <div style={{ ...num, color: pal.textSoft }}>{formatHours(r.indirect)}h</div>
         <div style={{ ...num, fontSize: 11.5, color: pal.textFaint }}>{formatDateShort(r.startDate)}</div>
         <div style={{ ...num, fontSize: 11.5, color: pal.textFaint }}>{r.endDate ? formatDateShort(r.endDate) : '—'}</div>
-        <div style={{ ...num, fontWeight: 600, color: r.weeklyMargin == null ? pal.textFaint : (r.weeklyMargin < 0 ? pal.warn : pal.text) }}>
-          {r.weeklyMargin == null ? '—' : fmt(r.weeklyMargin)}
-        </div>
+        {canView && (
+          <div style={{ ...num, fontWeight: 600, color: r.weeklyMargin == null ? pal.textFaint : (r.weeklyMargin < 0 ? pal.warn : pal.text) }}>
+            {r.weeklyMargin == null ? '—' : fmt(r.weeklyMargin)}
+          </div>
+        )}
       </div>
     );
   }

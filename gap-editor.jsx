@@ -88,6 +88,9 @@
     }, [draft.districtId, draft.spec]);
     // Re-render when a teammate edits a rate card the active gap depends on.
     if (window.useDistrictRateCards) window.useDistrictRateCards();
+    // Finance visibility: the bill-rate override is admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
 
     const scopeOptions = React.useMemo(() => {
       const out = [];
@@ -277,9 +280,9 @@
               </div>
             </div>
 
-            {/* Bill rate + Status */}
+            {/* Bill rate (admins only) + Status */}
             <div style={styles.row}>
-              <div>
+              {canView && <div>
                 <div style={styles.label}>Bill rate ($ / hr)</div>
                 <input type="number" min="0" step="1"
                   value={draft.billRate == null ? '' : draft.billRate}
@@ -291,7 +294,7 @@
                     ? `Leave blank to use the ${draft.districtName || 'district'} rate card (${'$' + resolvedRate}/hr). Type a value to override for this gap.`
                     : `Leave blank to use the district rate card. Type a value to override.`}
                 </div>
-              </div>
+              </div>}
               <div>
                 <div style={styles.label}>Status</div>
                 <div style={styles.pillRow}>

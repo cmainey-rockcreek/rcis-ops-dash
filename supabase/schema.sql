@@ -380,6 +380,124 @@ alter table public.contractors          drop column if exists bill_rate;
 alter table public.contractor_overrides drop column if exists bill_rate;
 alter table public.assignments          drop column if exists bill_rate;
 
+-- ─── Finance tables (admin-only) ─────────────────────────────────────────
+-- Pay, bill, burden and rate-band data is readable and writable only by
+-- admins (`is_admin()`), so non-admin teammates never receive it: RLS
+-- returns zero rows and Realtime sends them nothing. Money was moved out of
+-- the shared tables because RLS is per row, not per column, and Realtime
+-- delivers whole rows — a masked column would still leak through it.
+--
+-- Rollout (see docs/finance-visibility-scope.md). This file only ever adds
+-- structure and sets policies; it never moves or drops data, so it is safe
+-- to re-paste at any point of the rollout. The data steps are one-shot
+-- files in this folder, each guarded by the state of the database:
+--   Phase A  paste this file, then migrate-finance-rates.sql (mirrors the
+--            legacy columns into these tables). The legacy columns
+--            (contractors.pay_rate, contractor_overrides.pay_rate,
+--            assignments.pay_rate, coverage_gaps.bill_rate, the five
+--            financial columns of spec_settings) stay so the live client
+--            keeps working. Testing the Phase B client at localhost writes
+--            to these tables; reset-finance-mirror.sql throws that away
+--            (allowed only while the legacy columns are the truth).
+--   Phase B  deploy day: reset, migrate, deploy, everyone reloads, then
+--            phase-b-live.sql: checks the mirror is exact, marks Phase B
+--            live, blanks the legacy copies and installs triggers that keep
+--            them blank against stale old-client tabs.
+--   Phase C  paste phase-c-drop-legacy-rates.sql to drop the legacy
+--            columns; in the same commit trim the spec_settings `create
+--            table` and seed below (the file says exactly how).
+-- Undo at any point: rollback-finance-access.sql.
+--
+-- State marker: the table comment on spec_financials. Empty = migrate has
+-- not run; a timestamp = last migrate run; "LOCKED …" = Phase B live.
+-- Nothing in this file may set that comment, and nobody should edit it in
+-- the Supabase Table Editor (it shows as the table "description").
+--
+-- NOT NULL on the three rate columns is deliberate: a missing row means
+-- "no rate set". The client clears a rate by deleting the row, never by
+-- writing null. The two FKs cascade on delete, and cascades run outside
+-- RLS by design: any active member who can delete an assignment or gap
+-- removes (but never reads) its rate row. Keep the default replica
+-- identity on all four tables: Realtime does not apply RLS to DELETE
+-- payloads, and `replica identity full` would broadcast the deleted row's
+-- rate to every subscriber.
+
+-- One pay rate per contractor, whether the contractor is a mock from
+-- data-contractors.js or a Supabase row. No FK: mock ids are not in
+-- `contractors`, so a trigger below stands in for the cascade when a
+-- Supabase contractor is deleted.
+create table if not exists public.contractor_pay_rates (
+  contractor_id  text primary key,
+  pay_rate       numeric not null,
+  updated_at     timestamptz not null default now()
+);
+
+-- Stand-in cascade: deleting a Supabase contractor removes its pay row.
+-- Security definer because the deleter may be a non-admin who cannot see
+-- the row; like a real FK cascade this runs outside RLS. Trigger-returning
+-- functions cannot be called through the API.
+create or replace function public.cascade_contractor_pay_rate_delete()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  delete from public.contractor_pay_rates where contractor_id = old.id;
+  return old;
+end;
+$$;
+drop trigger if exists cascade_contractor_pay_rate_delete on public.contractors;
+create trigger cascade_contractor_pay_rate_delete after delete on public.contractors
+  for each row execute function public.cascade_contractor_pay_rate_delete();
+
+-- Per-assignment pay override (financials.js `effectivePay` falls back to
+-- the contractor's rate). Removed with its assignment.
+create table if not exists public.assignment_rates (
+  assignment_id  text primary key references public.assignments(id) on delete cascade,
+  pay_rate       numeric not null,
+  updated_at     timestamptz not null default now()
+);
+
+-- Per-gap bill override (financials.js `effectiveBill` falls back to the
+-- district rate card). Removed with its gap.
+create table if not exists public.gap_bill_rates (
+  gap_id      text primary key references public.coverage_gaps(id) on delete cascade,
+  bill_rate   numeric not null,
+  updated_at  timestamptz not null default now()
+);
+
+-- Per-specialty burden $/hr and default pay/bill bands. `spec_settings`
+-- keeps only `indirect_ratio`, which every teammate needs for the
+-- AssignmentEditor auto-fill. Seeded with the same prototype defaults as
+-- spec_settings; the migrate file overwrites them with the live values.
+create table if not exists public.spec_financials (
+  spec_code                  text primary key,
+  burden_per_billable_hour   numeric not null default 0,
+  default_pay_low            numeric,
+  default_pay_high           numeric,
+  default_bill_low           numeric,
+  default_bill_high          numeric,
+  updated_at                 timestamptz not null default now()
+);
+
+-- Seed rows carry an old updated_at on purpose: the one-shot files treat a
+-- finance row newer than the migrate marker as a Phase B client edit, and
+-- a seed added by a later re-paste must never look like one.
+insert into public.spec_financials
+  (spec_code, burden_per_billable_hour,
+   default_pay_low, default_pay_high, default_bill_low, default_bill_high, updated_at)
+values
+  ('SLP',  0, 58, 78,  88, 115, '2000-01-01'),
+  ('OT',   0, 60, 80,  90, 120, '2000-01-01'),
+  ('PT',   0, 62, 82,  92, 125, '2000-01-01'),
+  ('PSY',  0, 68, 92, 100, 145, '2000-01-01'),
+  ('BCBA', 0, 65, 88,  95, 135, '2000-01-01'),
+  ('MH',   0, 55, 75,  85, 110, '2000-01-01'),
+  ('SPED', 0, 50, 70,  78, 105, '2000-01-01')
+on conflict (spec_code) do nothing;
+
+-- Phase C (dropping the legacy columns) lives in
+-- phase-c-drop-legacy-rates.sql, not here, so that re-pasting this file
+-- can never destroy data. Until Phase C runs, the legacy columns above
+-- still exist: blank after phase-b-live.sql, populated before it.
+
 -- ─── Auto-update updated_at on row updates ────────────────────────────────
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql set search_path = '' as $$
@@ -447,6 +565,24 @@ create trigger touch_contractors before update on public.contractors
 
 drop trigger if exists touch_district_rate_cards on public.district_rate_cards;
 create trigger touch_district_rate_cards before update on public.district_rate_cards
+  for each row execute function public.touch_updated_at();
+
+-- Finance tables. migrate-finance-rates.sql pauses these four by name while
+-- it copies legacy updated_at values across — keep the trigger names stable.
+drop trigger if exists touch_contractor_pay_rates on public.contractor_pay_rates;
+create trigger touch_contractor_pay_rates before update on public.contractor_pay_rates
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_assignment_rates on public.assignment_rates;
+create trigger touch_assignment_rates before update on public.assignment_rates
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_gap_bill_rates on public.gap_bill_rates;
+create trigger touch_gap_bill_rates before update on public.gap_bill_rates
+  for each row execute function public.touch_updated_at();
+
+drop trigger if exists touch_spec_financials on public.spec_financials;
+create trigger touch_spec_financials before update on public.spec_financials
   for each row execute function public.touch_updated_at();
 
 -- ─── Auth user → team profile automation ─────────────────────────────────
@@ -667,6 +803,10 @@ alter table public.entity_notes  enable row level security;
 alter table public.spec_settings enable row level security;
 alter table public.contractors enable row level security;
 alter table public.district_rate_cards enable row level security;
+alter table public.contractor_pay_rates enable row level security;
+alter table public.assignment_rates     enable row level security;
+alter table public.gap_bill_rates       enable row level security;
+alter table public.spec_financials      enable row level security;
 
 drop policy if exists "team full access" on public.todos;
 create policy "team full access" on public.todos
@@ -814,10 +954,35 @@ create policy "team full access" on public.contractors
   for all to authenticated
   using ((select public.is_active_member())) with check ((select public.is_active_member()));
 
+-- Finance: admins only. The `drop ... "team full access"` on
+-- district_rate_cards retires the policy every active member had before
+-- Oct 16, 2026. Non-admins get zero rows, not an error, so the client
+-- stores load cleanly and the UI hides the empty widgets.
 drop policy if exists "team full access" on public.district_rate_cards;
-create policy "team full access" on public.district_rate_cards
+drop policy if exists "admins full access" on public.district_rate_cards;
+create policy "admins full access" on public.district_rate_cards
   for all to authenticated
-  using ((select public.is_active_member())) with check ((select public.is_active_member()));
+  using ((select public.is_admin())) with check ((select public.is_admin()));
+
+drop policy if exists "admins full access" on public.contractor_pay_rates;
+create policy "admins full access" on public.contractor_pay_rates
+  for all to authenticated
+  using ((select public.is_admin())) with check ((select public.is_admin()));
+
+drop policy if exists "admins full access" on public.assignment_rates;
+create policy "admins full access" on public.assignment_rates
+  for all to authenticated
+  using ((select public.is_admin())) with check ((select public.is_admin()));
+
+drop policy if exists "admins full access" on public.gap_bill_rates;
+create policy "admins full access" on public.gap_bill_rates
+  for all to authenticated
+  using ((select public.is_admin())) with check ((select public.is_admin()));
+
+drop policy if exists "admins full access" on public.spec_financials;
+create policy "admins full access" on public.spec_financials
+  for all to authenticated
+  using ((select public.is_admin())) with check ((select public.is_admin()));
 
 -- ─── Realtime ─────────────────────────────────────────────────────────────
 -- Lets the app receive live updates when teammates change anything.
@@ -891,6 +1056,22 @@ exception when duplicate_object then null;
 end $$;
 do $$ begin
   alter publication supabase_realtime add table public.district_rate_cards;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.contractor_pay_rates;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.assignment_rates;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.gap_bill_rates;
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.spec_financials;
 exception when duplicate_object then null;
 end $$;
 

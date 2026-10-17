@@ -32,7 +32,7 @@ At every phase or run boundary, reconcile: compare `git log` since the last boun
 There are no ES modules, no imports/exports. Every file is an IIFE that attaches its exports to `window`:
 
 - Data: `window.RCIS_DATA` (mocks from `data.js` + enrichment in `data-contractors.js` / `data-schools.js`)
-- Stores: `window.TodosStore`, `window.GapsStore`, `window.RenewalsStore`, `window.AssignmentsStore`, `window.ContactsStore`, `window.DocumentsStore`, `window.NotesStore`, `window.CommentsStore`, `window.GapCommentsStore`, `window.MatchProposalsStore`, `window.ScheduleSlotsStore`, `window.ContractorOverridesStore`, `window.SchoolOverridesStore`, `window.DistrictOverridesStore`, `window.SpecSettingsStore`, `window.TeamStore`
+- Stores: `window.TodosStore`, `window.GapsStore`, `window.RenewalsStore`, `window.AssignmentsStore`, `window.ContactsStore`, `window.DocumentsStore`, `window.NotesStore`, `window.CommentsStore`, `window.GapCommentsStore`, `window.MatchProposalsStore`, `window.ScheduleSlotsStore`, `window.ContractorOverridesStore`, `window.SchoolOverridesStore`, `window.DistrictOverridesStore`, `window.SpecSettingsStore`, `window.DistrictRateCardStore`, `window.FinanceRatesStore`, `window.TeamStore`
 - Auth + Supabase: `window.sb`, `window.useAuth`, `window.signInWithPassword`, `window.signUpWithPassword`, `window.signOut`
 - Router: `window.useRoute`, `window.navigate`, `window.Link`
 - UI primitives: `window.OwnerAvatar`, `window.SpecChip`, `window.StatusPill`, `window.PrioDot`, `window.CapacityBar`, `window.WeekGrid`, `window.MiniSpark`, `window.Icon`
@@ -69,6 +69,8 @@ Supabase credentials live in `supabase-config.js` and are intentionally shipped 
 - `is_active_member()` — `active = true` on a claimed row. Every data table, the comment tables (own rows only), and the Storage bucket require it. A teammate toggled inactive on /admin is locked out even with a valid session; `<AuthGate>` shows an "account inactive" screen when `useCurrentProfile()` reports `active: false`.
 - `is_admin()` — `is_admin = true` as well. Required to invite, cancel invites, and update other people's profiles. Anyone can update their own row, but the `protect_team_profile_identity` trigger rejects changing your own `active` or `is_admin`, so nobody can reinstate or promote themselves. The free-text `role` column is a display label only.
 
+**Money is admin-only** (finance visibility, Oct 2026). Pay, bill, burden and rate-band data live in four tables whose policies require `is_admin()`: `contractor_pay_rates`, `assignment_rates`, `gap_bill_rates`, `spec_financials`, plus `district_rate_cards`. A non-admin's reads return zero rows, not an error. `finance-rates-store.js` (`window.FinanceRatesStore`) is the only reader and writer; the shared-table stores forward any `payRate` / `billRate` / burden patch to it and never send those keys themselves. The UI gate is `window.useFinanceAccess()` → `{ ready, canView }`, false until the profile loads (fail closed); every financial widget, the margin column and its CSV column, the rate fields in the editors, the Financials page and its sidebar entry render only when `canView` is true. Mock contractor pay still lives in `data-contractors.js` and is hidden by the same gate. Rollout files, state marker and rollback: `docs/finance-visibility-scope.md` and the `supabase/*.sql` one-shots.
+
 Nothing in `schema.sql` grants the first admin — after applying it, run `update public.team_profiles set is_admin = true where email = '…'` once. **Apply schema changes before deploying code that depends on them**: the store selects `is_admin`, and PostgREST returns 400 for an unknown column, which drops the team list to the prototype mocks. To change permissioning, edit the policies in `schema.sql` and re-paste into Supabase SQL Editor — the file is idempotent (uses `if not exists` / `drop policy if exists`).
 
 ### Store pattern (important — every store works this way)
@@ -99,9 +101,9 @@ Treat the mocks as the **prototype dataset**. When real RCIS data arrives, it pl
 `financials.js` is the single source of truth for any pay/bill/margin number. Conventions:
 
 - `WEEKS_PER_MONTH = 4`, `WEEKS_PER_SCHOOL_YEAR = 36`
-- Effective rate = assignment-level rate if set, else contractor default
+- Effective rate = assignment-level rate if set, else contractor default. Both come from `FinanceRatesStore` (`window.assignmentPayFor(id)`, `window.contractorPayFor(c)`); bill comes from the district rate card, then `window.defaultBillFor(spec)`. All of these answer null / 0 for a non-admin.
 - `weeklyHours(a) = direct + indirect`
-- **Gross margin** = `bill − pay`. **Net margin** = `bill − pay − burden(spec)`. Burden comes from `window.burdenFor(specCode)` via `SpecSettingsStore`; defaults to 0 when no spec or no admin-set row.
+- **Gross margin** = `bill − pay`. **Net margin** = `bill − pay − burden(spec)`. Burden comes from `window.burdenFor(specCode)` via `FinanceRatesStore` (`spec_financials`); defaults to 0 when no spec or no admin-set row.
 - The `marginPerHour` / `weeklyMargin` / `annualMargin` helpers are gross. The matching `netMarginPerHour` / `weeklyNetMargin` / `annualNetMargin` helpers subtract burden per row.
 
 Don't multiply rates × hours inline in components — call into `ContractorFinancials` so future tweaks (utilization targets, real payroll integration) land in one place.
@@ -147,7 +149,8 @@ Key tables and their purpose:
 - `documents` — link docs (`source='link'`, `url` set) or uploaded docs (`source='upload'`, `storage_path` set). Uploads stream from the **`task-attachments` Storage bucket** (same bucket for tasks and renewals) via signed URLs.
 - `entity_notes` — free-text notes per (scope, scope_id).
 - `contractor_overrides`, `school_overrides`, `district_overrides` — see "Mock + override hybrid" above.
-- `spec_settings` — per-specialty admin-editable config: `indirect_ratio` (drives the AssignmentEditor auto-indirect), `burden_per_billable_hour` (drives net margin), and default pay/bill rate bands. Edited from `/admin`.
+- `spec_settings` — per-specialty `indirect_ratio` (drives the AssignmentEditor auto-indirect), readable by every active member. Its legacy financial columns are blank after Phase B and dropped in Phase C.
+- `spec_financials`, `contractor_pay_rates`, `assignment_rates`, `gap_bill_rates` — admin-only money (burden per billable hour and default pay/bill bands per specialty; pay per contractor; per-assignment pay override; per-gap bill override). Rate columns are NOT NULL: a missing row means "no rate", and the client deletes the row instead of writing null. `district_rate_cards` is admin-only too. Edited from `/financials`, the contractor profile, and the editors. The table comment on `spec_financials` is the rollout state marker (empty / timestamp / `LOCKED`); do not edit it in the Table Editor.
 
 Every table gets a `touch_updated_at` trigger and is added to the `supabase_realtime` publication. When you add a table, follow the same three-step pattern in `schema.sql`: create → trigger → realtime → RLS policy.
 

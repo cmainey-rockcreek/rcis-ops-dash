@@ -876,6 +876,10 @@
     // district's rate card edit re-derives the tile live.
     if (window.useSpecSettings) window.useSpecSettings();
     if (window.useDistrictRateCards) window.useDistrictRateCards();
+    if (window.useFinanceRates) window.useFinanceRates();
+    // Finance visibility: revenue is admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
 
     const today = new Date().toLocaleDateString('en-US', {
       weekday: 'long', month: 'long', day: 'numeric',
@@ -930,12 +934,13 @@
               spec: a.spec || '',
               schoolId: a.schoolId || null,
               districtId: a.districtId || null,
-              payRate: a.payRate,
+              payRate: window.assignmentPayFor ? window.assignmentPayFor(a.id) : null,
             };
           });
         const merged = [...real, ...mock];
         const defaults = { pay: c.rates && c.rates.hourly, spec: c.spec };
-        totalAnnualRev   += F.annualRevenue(merged, defaults);
+        // Hours are not financial; only the revenue sum is admin-only.
+        if (canView) totalAnnualRev += F.annualRevenue(merged, defaults);
         weeklyBookedHours += F.weeklyHours
           ? merged.filter((a) => a.status === 'active').reduce((s, a) => s + F.weeklyHours(a), 0)
           : 0;
@@ -988,9 +993,11 @@
               {show('stats') && (
                 <CollapsibleSection pal={pal} title="Quick stats" collapseKey="stats">
                   <div style={{ display: 'flex', gap: 10 }}>
-                    <StatTile pal={pal} label="Annual revenue"
-                      value={fmtCompact.format(totalAnnualRev || 0)}
-                      deltaSub="active assignments · 36-wk year" />
+                    {canView && (
+                      <StatTile pal={pal} label="Annual revenue"
+                        value={fmtCompact.format(totalAnnualRev || 0)}
+                        deltaSub="active assignments · 36-wk year" />
+                    )}
                     <StatTile pal={pal} label="Active contractors"
                       value={String(activeContractorsCount)}
                       deltaSub={`of ${contractors.length} total`} />
