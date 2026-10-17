@@ -87,6 +87,11 @@ Each store is a singleton IIFE with the same shape, e.g. `todos-store.js`:
 
 When adding a new persisted entity, copy this template from `todos-store.js` — don't re-invent it.
 
+Two conventions added in Oct 2026:
+
+- **Money never rides on a shared table.** Pay, bill, burden and anything derived from them live in the admin-only finance tables and go through `finance-rates-store.js`. If an editor hands a store a `payRate` / `billRate` / burden key, the store forwards it to `FinanceRatesStore` and strips it from its own payload (see `assignments-store.js` `add`/`update` for the pattern). PostgREST rejects unknown columns on write, so a leftover key breaks every save once the column is gone.
+- **Bump the cache key when a row stops carrying something sensitive.** The stores moved from `…cache.v1` to `…cache.v2` and remove the v1 key on boot, so values a teammate should no longer see do not linger in their browser.
+
 ### Mock + override hybrid
 
 Contractors, schools, and districts have large in-file mock catalogs (`data.js`, `data-contractors.js`, `data-schools.js`) that are merged with two kinds of Supabase data on read:
@@ -154,6 +159,8 @@ Key tables and their purpose:
 
 Every table gets a `touch_updated_at` trigger and is added to the `supabase_realtime` publication. When you add a table, follow the same three-step pattern in `schema.sql`: create → trigger → realtime → RLS policy.
 
+**Changing where data lives** (moving a column, tightening a policy on data the live client still reads) is a three-phase rollout, not one paste: schema additions first (the live client keeps working), then the client switch, then the drop. Keep `schema.sql` additive and put each data step in its own guarded one-shot file that refuses to run in the wrong state. `docs/finance-visibility-scope.md` and the five `supabase/*-finance-*.sql` / `phase-*.sql` files are the worked example, including the rollback that picks its mode from the database.
+
 ## Build process — follow this for every feature
 
 The owner is not a developer. They own the outcome and the behavior checks; Claude owns the code. Follow these steps in order and say which step you are on.
@@ -165,6 +172,6 @@ The owner is not a developer. They own the outcome and the behavior checks; Clau
 5. **Owner tests.** Hand off with the done-checklist. Wait for the owner to confirm at localhost.
 6. **Review.** Run `/code-review`. Then answer three questions in plain English: what changed, what could break, what was not tested. Run `/security-review` if the change touches auth, keys, RLS policies, Storage, or Supabase schema.
 7. **Commit.** Message says why, not just what. Delete the finished item from `SPEC.md` in the same commit.
-8. **Push + Vercel preview.** Owner may need to push from GitHub Desktop. Check the preview URL as a teammate would.
-9. **Merge to `main`.** Confirm the Vercel deployment is READY and watch for errors.
+8. **Push + Vercel preview.** `git push` is denied in Claude sessions here: hand the owner the exact command in a `bash` block (or they push from GitHub Desktop). Check the preview URL as a teammate would; the in-app browser may be refused access to the Vercel host, in which case confirm the preview serves the changed files with `curl`.
+9. **Merge to `main`.** `gh pr merge` is denied too; give the owner the command. Confirm the Vercel deployment is READY and watch for errors.
 10. **Record what was learned.** Update this file or `SPEC.md` with anything the next session needs to know.
