@@ -29,6 +29,11 @@ exercised: attachment upload and delete from that page, the CSV opening in
 Excel, and a saved row whose contractor was later deleted (listed under
 Polish).
 
+Finance visibility shipped Oct 17 (PR #4 plus a schema drop the same
+day): pay, bill, burden, revenue and margin live in admin-only tables and
+render only for admins; Christo, Kathleen and Mark are admins. Brief and
+rollback: `docs/finance-visibility-scope.md`.
+
 **Next:** the Content-Security-Policy + production React item below is the
 last piece of the security gate. Decide in planning whether to keep Babel
 compiling in the browser (a looser CSP) or add a small pre-compile step (a
@@ -75,58 +80,6 @@ projections, broken down by company total / district / specialty /
 contractor. Depends on a monthly time-entries CSV import from the time
 tracker; build after that import exists. Fully scoped in
 `docs/financials-page-scope.md`.
-
-### Finance visibility — Phase A drafted Oct 16, 2026
-
-Before more internal staff are invited, pay, bill, revenue and margin must
-be visible only to admins. Decided Oct 16: no new flag; Kathleen and Mark
-become admins. The money moves out of the shared tables into admin-only
-tables (`contractor_pay_rates`, `assignment_rates`, `gap_bill_rates`,
-`spec_financials`) so RLS and Realtime withhold it, and the UI hides every
-financial widget for everyone else. Fully scoped in
-`docs/finance-visibility-scope.md`.
-
-- **Phase A — schema. Applied to the live project Oct 17, 2026** (schema
-  via a Supabase migration named `finance_visibility_phase_a_schema`, then
-  the migrate; receipt 4/4/1/7, value-level mirror exact, impersonation
-  check: non-admin sees 0 rows in all five finance tables, admin sees all).
-  Two admins at apply time; flip the remaining one on /admin if not done.
-  `schema.sql` adds the tables,
-  triggers, realtime and admin-only policies and never moves or drops
-  data. Five guarded one-shot files do the data steps:
-  `migrate-finance-rates.sql`, `reset-finance-mirror.sql`,
-  `phase-b-live.sql`, `phase-c-drop-legacy-rates.sql`,
-  `rollback-finance-access.sql`. State lives in the table comment on
-  `spec_financials` (empty / timestamp / `LOCKED`). Owner steps, in order:
-  flip Kathleen and Mark to admin on /admin, paste `schema.sql` (from this
-  worktree, not `main`), paste the migrate and check its receipt, tell the
-  team that until deploy day non-admins see default-band bill figures,
-  cannot edit rate cards, and should not change any pay, bill or burden
-  figure. Decided Oct 17: after Phase B only admins can edit the
-  indirect-hours ratio (it lives on `/financials`); everyone still sees
-  the auto-fill it drives.
-- **Phase B — client. Built Oct 17, 2026; owner checklist passed the same
-  day.** `finance-rates-store.js` (four maps, realtime, a
-  cleared or 0 rate deletes the row), the five shared-table stores no
-  longer read or send the legacy keys and forward pay / bill / burden
-  patches to it, `useFinanceAccess()` gates every financial widget, the
-  margin column and its CSV column, the rate fields in the editors, the
-  Financials page and its sidebar entry; pre-change cache keys are removed
-  on boot. Verified at localhost in both modes with mock data and a clean
-  console. Owner runs the done-checklist in the brief (needs an admin and
-  a non-admin sign-in at `http://127.0.0.1:4175`, email + password).
-  Then deploy day, in order: everyone stops editing rates → paste the
-  reset → paste the migrate → merge and deploy → everyone reloads → paste
-  `phase-b-live.sql` (checks the mirror is exact, locks, blanks the legacy
-  copies, installs blanking triggers).
-- **Phase C — drop the legacy columns** a few days after Phase B is live:
-  paste `phase-c-drop-legacy-rates.sql` (refuses unless `LOCKED`). Same
-  commit: trim the `spec_settings` create table and seed insert in
-  `schema.sql`, remove the legacy `pay_rate` / `bill_rate` lines from the
-  other four create tables, and update CLAUDE.md and the code comments that
-  still name `spec_settings.default_bill_low`. Precondition: the live
-  client sends none of the legacy keys in write bodies to any of the five
-  tables (done-checklist item 4 in the brief).
 
 ### Next up — security gate, before real data migration
 
@@ -209,8 +162,8 @@ the migration sequence. Not yet scheduled; will get its own brief.
 
 - **Real pay rates go into `contractor_pay_rates`, never a static file.**
   Mock pay today is generated in `data-contractors.js`, which Vercel serves
-  to anyone with the URL. Once finance visibility ships, the finance-only
-  tables are the only acceptable home for real compensation data.
+  to anyone with the URL. The admin-only finance tables are the only
+  acceptable home for real compensation data.
 
 ---
 
@@ -218,7 +171,7 @@ the migration sequence. Not yet scheduled; will get its own brief.
 
 - **"Today" source of truth.** `RCIS_TODAY` is frozen at a mock date while some
   date math uses the real current date. Pick one and apply it consistently.
-- **Non-financial data permissions.** Finance visibility is scoped above.
+- **Non-financial data permissions.** Finance visibility shipped Oct 17.
   Every active teammate still has full read/write on contractors, schools,
   districts, tasks, gaps, renewals and attachments. Decide later whether
   any of that should be limited too. The free-text `role` stays a display
