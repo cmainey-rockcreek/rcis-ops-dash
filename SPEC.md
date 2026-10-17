@@ -8,7 +8,7 @@ same commit that ships it; when new work is found, it is added here.
 **Guiding priority:** get a mostly working prototype in front of the team
 before investing in integrations or deep polish.
 
-**Where we are (Oct 13, 2026):** the prototype is live at
+**Where we are (Oct 17, 2026):** the prototype is live at
 `https://rcis-dash.vercel.app` on the free Supabase tier and the team is
 using it. Sign-up is invite-only (add the teammate on /admin, they create
 their account with that email) and sign-in is complete: email + password,
@@ -16,23 +16,37 @@ their account with that email) and sign-in is complete: email + password,
 with Google" for Rock Creek Workspace accounts. Access control is enforced
 in RLS: an inactive teammate is refused every read and write, and only
 admins (`team_profiles.is_admin`) can invite or edit other profiles.
-Christo is the admin. `supabase/rollback-rls-active-admin.sql` undoes the
-policies in one paste if ever needed.
+`supabase/rollback-rls-active-admin.sql` undoes those policies in one
+paste if ever needed.
 
-The Assignments master page shipped Oct 13 (PR #3, live). `/assignments`
-lists every placement grouped by school under district, with a flat
-sortable table toggle, filters, totals, a show-completed chip, the same
-editor as the contractor page, and the app's first working CSV export.
-Owner ran the four-item done-checklist at localhost; code review at high
-effort found six items, four fixed, two deferred to Polish below. Not yet
-exercised: attachment upload and delete from that page, the CSV opening in
-Excel, and a saved row whose contractor was later deleted (listed under
-Polish).
+Shipped since Oct 8: the Assignments master page (`/assignments`, PR #3,
+Oct 13) and finance visibility (PRs #4 and #5, Oct 17). Since Oct 17 every
+pay, bill, burden, revenue and margin figure lives in five admin-only
+tables (`contractor_pay_rates`, `assignment_rates`, `gap_bill_rates`,
+`spec_financials`, `district_rate_cards`), is read and written only by
+`finance-rates-store.js`, and renders only for admins through
+`useFinanceAccess()`. The shared tables have no money column any more.
+Admins: Christo, Kathleen, Mark. Everyone else sees no financial widget,
+and `/financials` tells them it is admin-only. The rollout is complete,
+including the final column drop; `docs/finance-visibility-scope.md` is the
+record and holds the rollback procedure (`supabase/rollback-finance-access.sql`
+works out its mode from the database).
 
-Finance visibility shipped Oct 17 (PR #4 plus a schema drop the same
-day): pay, bill, burden, revenue and margin live in admin-only tables and
-render only for admins; Christo, Kathleen and Mark are admins. Brief and
-rollback: `docs/finance-visibility-scope.md`.
+**Handoff notes (Oct 17, 2026), for whoever picks this up next:**
+
+- Treat money as admin-only by construction. A new pay or bill field goes
+  in a finance table with an `is_admin()` policy and is read through
+  `FinanceRatesStore`, never added to a shared table. CLAUDE.md "Auth +
+  data" and "Money math" say how.
+- Verifying anything financial needs two sign-ins: an admin and a
+  non-admin (a pending-invite test account works). Email + password
+  sign-in works on any localhost port; in a worktree use a port other
+  than 4173.
+- The table comment on `spec_financials` reads `LOCKED …` and is the
+  rollout state marker. Leave it alone; the one-shot SQL files read it.
+- Pushes and merges are the owner's: Claude sessions are not permitted to
+  run `git push` or `gh pr merge` here, so expect to be handed the command.
+- Two small follow-ups from the Phase B code review sit under Polish.
 
 **Next:** the Content-Security-Policy + production React item below is the
 last piece of the security gate. Decide in planning whether to keep Babel
@@ -57,7 +71,10 @@ There is no automated test suite. After each item, verify by hand:
 2. Open `http://localhost:4173` in a browser.
 3. Confirm the page loads with no errors in the browser console, and the change
    works as described.
-4. Sign in with email + password on localhost. Google and recovery-link
+4. Sign in with email + password on localhost (any port works for this;
+   use a free port such as 4175 when running from a worktree). Anything
+   financial needs a second, non-admin sign-in to confirm it is hidden.
+   Google and recovery-link
    sign-ins return through Supabase and only come back to localhost because
    `http://localhost:4173/**` is in Auth → URL Configuration → Redirect URLs
    (added Oct 8). If a redirect ever lands on the live site, you are testing
@@ -73,8 +90,9 @@ from this file in that same commit.
 
 ### Financials page
 
-The page exists at `/financials` with the margin calculator and the
-Specialty settings section (lifted from /admin). Remaining: the
+The page exists at `/financials` (admins only since Oct 17) with the margin
+calculator and the Specialty settings section, which now writes the ratio
+to `spec_settings` and burden to `spec_financials`. Remaining: the
 **reporting rollup** — company-wide earned revenue, gross/net margin, and
 projections, broken down by company total / district / specialty /
 contractor. Depends on a monthly time-entries CSV import from the time
