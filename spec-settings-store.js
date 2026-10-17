@@ -1,27 +1,29 @@
-// SpecSettingsStore — per-specialty knobs that drive auto-indirect ratios
-// and Net Margin burden. Mirrors contractor-overrides-store.js: cold cache,
-// realtime, optimistic upsert, hook + sync helpers.
+// SpecSettingsStore — the per-specialty indirect-hours ratio that drives
+// the AssignmentEditor auto-fill. Every active teammate can read it.
 //
-// Defaults if no row exists for a spec:
-//   indirectRatio       = 0.25
-//   burdenPerBillable   = 0   (additive cost beyond pay rate)
+// Burden $/hr and the default pay/bill bands used to live on this row too;
+// since the finance visibility change (Oct 2026) they are admin-only and
+// live in spec_financials, served by finance-rates-store.js (which also
+// defines window.burdenFor / window.defaultBillFor). An `upsert` here that
+// carries any of those keys forwards them there and keeps them off this
+// row. Mirrors contractor-overrides-store.js: cold cache, realtime,
+// optimistic upsert, hook + sync helper.
+//
+// Default if no row exists for a spec: indirectRatio = 0.25.
 
 window.SpecSettingsStore = (() => {
-  const CACHE_KEY = 'rcis.spec_settings.cache.v1';
+  // v2: rows no longer carry the financial columns.
+  const CACHE_KEY = 'rcis.spec_settings.cache.v2';
+  try { localStorage.removeItem('rcis.spec_settings.cache.v1'); } catch (e) {}
   const TABLE = 'spec_settings';
 
   const DEFAULT_INDIRECT_RATIO = 0.25;
-  const DEFAULT_BURDEN = 0;
+  const FINANCIAL_KEYS = ['burdenPerBillableHour', 'defaultPayLow', 'defaultPayHigh', 'defaultBillLow', 'defaultBillHigh'];
 
   function fromRow(r) {
     return {
       specCode: r.spec_code,
       indirectRatio: r.indirect_ratio != null ? Number(r.indirect_ratio) : DEFAULT_INDIRECT_RATIO,
-      burdenPerBillableHour: r.burden_per_billable_hour != null ? Number(r.burden_per_billable_hour) : DEFAULT_BURDEN,
-      defaultPayLow:   r.default_pay_low   != null ? Number(r.default_pay_low)   : null,
-      defaultPayHigh:  r.default_pay_high  != null ? Number(r.default_pay_high)  : null,
-      defaultBillLow:  r.default_bill_low  != null ? Number(r.default_bill_low)  : null,
-      defaultBillHigh: r.default_bill_high != null ? Number(r.default_bill_high) : null,
       updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : Date.now(),
     };
   }
@@ -29,11 +31,6 @@ window.SpecSettingsStore = (() => {
     return {
       spec_code: o.specCode,
       indirect_ratio: o.indirectRatio != null ? o.indirectRatio : DEFAULT_INDIRECT_RATIO,
-      burden_per_billable_hour: o.burdenPerBillableHour != null ? o.burdenPerBillableHour : DEFAULT_BURDEN,
-      default_pay_low:   o.defaultPayLow,
-      default_pay_high:  o.defaultPayHigh,
-      default_bill_low:  o.defaultBillLow,
-      default_bill_high: o.defaultBillHigh,
     };
   }
 
@@ -119,9 +116,21 @@ window.SpecSettingsStore = (() => {
 
     async upsert(specCode, patch) {
       if (!specCode) return;
+      // Financial keys are admin-only and live in spec_financials.
+      const fin = {};
+      const rest = {};
+      Object.keys(patch || {}).forEach((k) => {
+        if (FINANCIAL_KEYS.includes(k)) fin[k] = patch[k]; else rest[k] = patch[k];
+      });
+      if (Object.keys(fin).length && window.FinanceRatesStore) {
+        window.FinanceRatesStore.upsertSpecFinancials(specCode, fin);
+      }
+      if (Object.keys(rest).length === 0) return;
+      patch = rest;
       const before = state[specCode]; // may be undefined if no prior row
       const existing = before || { specCode };
       const next = { ...existing, ...patch, specCode };
+      FINANCIAL_KEYS.forEach((k) => { delete next[k]; });
       setState({ ...state, [specCode]: next });
       const row = toRow(next);
       const { error } = await window.sb.from(TABLE)
@@ -145,7 +154,6 @@ window.SpecSettingsStore = (() => {
     ready() { return firstLoadPromise; },
 
     DEFAULT_INDIRECT_RATIO,
-    DEFAULT_BURDEN,
   };
 })();
 
@@ -167,23 +175,4 @@ window.indirectRatioFor = function indirectRatioFor(specCode) {
   return Number(s.indirectRatio);
 };
 
-window.burdenFor = function burdenFor(specCode) {
-  if (!specCode) return window.SpecSettingsStore.DEFAULT_BURDEN;
-  const s = window.SpecSettingsStore.get()[specCode];
-  if (!s || s.burdenPerBillableHour == null || !Number.isFinite(Number(s.burdenPerBillableHour))) {
-    return window.SpecSettingsStore.DEFAULT_BURDEN;
-  }
-  return Number(s.burdenPerBillableHour);
-};
-
-// Per-spec default bill rate — used as the financials.effectiveBill
-// fallback when no district_rate_cards row exists for a (district, spec).
-// Returns the spec's `default_bill_low` (a prototype-friendly floor) so
-// margin numbers don't collapse to $0 before each district is filled in.
-// Falls back to 0 when neither spec nor default exists.
-window.defaultBillFor = function defaultBillFor(specCode) {
-  if (!specCode) return 0;
-  const s = window.SpecSettingsStore.get()[specCode];
-  if (!s || s.defaultBillLow == null || !Number.isFinite(Number(s.defaultBillLow))) return 0;
-  return Number(s.defaultBillLow);
-};
+// window.burdenFor and window.defaultBillFor moved to finance-rates-store.js.

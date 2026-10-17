@@ -4,11 +4,15 @@
 //
 // Same shape as spec-settings-store.js: cold cache, realtime, optimistic
 // upsert, hook + sync helper. When a (district, spec) pair has no row,
-// financials.js falls back to spec_settings.default_bill_low so prototype
-// numbers don't collapse to $0 before each district is filled in.
+// financials.js falls back to spec_financials.default_bill_low (finance
+// store) so prototype numbers don't collapse to $0 before each district is
+// filled in. Admin-only since Oct 2026: non-admins load zero rows.
 
 window.DistrictRateCardStore = (() => {
-  const CACHE_KEY = 'rcis.district_rate_cards.cache.v1';
+  // v2: admin-only since Oct 2026; the v1 cache sat in every teammate's
+  // browser.
+  const CACHE_KEY = 'rcis.district_rate_cards.cache.v2';
+  try { localStorage.removeItem('rcis.district_rate_cards.cache.v1'); } catch (e) {}
   const TABLE = 'district_rate_cards';
 
   function keyOf(districtId, specCode) { return `${districtId}::${specCode}`; }

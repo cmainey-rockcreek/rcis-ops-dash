@@ -73,6 +73,10 @@
     };
   }
 
+  // Last 140px column is revenue, admins only.
+  const LIST_COLS          = '32px 2fr 60px 90px 100px 1.2fr 140px';
+  const LIST_COLS_NO_MONEY = '32px 2fr 60px 90px 100px 1.2fr';
+
   // ─── List Page ────────────────────────────────────────────────────────────
   function DistrictsListPage({ dark = false }) {
     return (
@@ -96,6 +100,10 @@
     // card changes (rollup reads window.rateCardFor inside its loop).
     const specSettings = window.useSpecSettings ? window.useSpecSettings() : null;
     const rateCards = window.useDistrictRateCards ? window.useDistrictRateCards() : null;
+    const financeRates = window.useFinanceRates ? window.useFinanceRates() : null;
+    // Finance visibility: revenue is admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
 
     const rows = React.useMemo(() => {
       const q = query.trim().toLowerCase();
@@ -117,7 +125,7 @@
         if (av > bv) return  dirMul;
         return 0;
       });
-    }, [enriched, query, sort, specSettings, rateCards]);
+    }, [enriched, query, sort, specSettings, rateCards, financeRates]);
 
     const totals = React.useMemo(() => {
       let students = 0, revenue = 0, contractors = new Set();
@@ -152,7 +160,7 @@
 
         {/* Rollup strip */}
         <div style={{ display: 'flex', gap: 10 }}>
-          <RollupTile pal={pal} label="Monthly revenue" value={`$${totals.revenue.toLocaleString()}`} accent />
+          {canView && <RollupTile pal={pal} label="Monthly revenue" value={`$${totals.revenue.toLocaleString()}`} accent />}
           <RollupTile pal={pal} label="Total students"  value={totals.students.toLocaleString()} />
           <RollupTile pal={pal} label="Contractors deployed" value={totals.contractors} />
           <RollupTile pal={pal} label="Districts"       value={rows.length} />
@@ -182,7 +190,7 @@
         }}>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '32px 2fr 60px 90px 100px 1.2fr 140px',
+            gridTemplateColumns: canView ? LIST_COLS : LIST_COLS_NO_MONEY,
             gap: 12, alignItems: 'center',
             padding: '10px 14px',
             background: pal.cardAlt,
@@ -196,10 +204,10 @@
             <SortHeader pal={pal} sort={sort} setSort={setSort} k="schools"  label="Schools"  right />
             <SortHeader pal={pal} sort={sort} setSort={setSort} k="students" label="Students" right />
             <span>Contractors</span>
-            <SortHeader pal={pal} sort={sort} setSort={setSort} k="revenue"  label="Monthly rev." right />
+            {canView && <SortHeader pal={pal} sort={sort} setSort={setSort} k="revenue"  label="Monthly rev." right />}
           </div>
 
-          {rows.map((d) => <DistrictRow key={d.id} d={d} pal={pal} />)}
+          {rows.map((d) => <DistrictRow key={d.id} d={d} pal={pal} canView={canView} />)}
         </div>
       </div>
     );
@@ -225,13 +233,13 @@
     );
   }
 
-  function DistrictRow({ d, pal }) {
+  function DistrictRow({ d, pal, canView }) {
     const r = d._r;
     const scount = r.schools.length || d.schools;
     return (
       <window.Link to={`/districts/${d.id}`} style={{
         display: 'grid',
-        gridTemplateColumns: '32px 2fr 60px 90px 100px 1.2fr 140px',
+        gridTemplateColumns: canView ? LIST_COLS : LIST_COLS_NO_MONEY,
         gap: 12, alignItems: 'center',
         padding: '12px 14px',
         borderBottom: `1px solid ${pal.borderSoft}`,
@@ -290,10 +298,12 @@
           )}
         </div>
 
-        <span style={{ textAlign: 'right', fontSize: 14, color: pal.accent, fontWeight: 600,
-          fontVariantNumeric: 'tabular-nums' }}>
-          ${r.annualRevenue.toLocaleString()}
-        </span>
+        {canView && (
+          <span style={{ textAlign: 'right', fontSize: 14, color: pal.accent, fontWeight: 600,
+            fontVariantNumeric: 'tabular-nums' }}>
+            ${r.annualRevenue.toLocaleString()}
+          </span>
+        )}
       </window.Link>
     );
   }
@@ -354,6 +364,10 @@
     // district's rate card changes.
     if (window.useSpecSettings) window.useSpecSettings();
     if (window.useDistrictRateCards) window.useDistrictRateCards();
+    if (window.useFinanceRates) window.useFinanceRates();
+    // Finance visibility: revenue, margin and the rate card are admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
     const base = window.RCIS_DATA.DISTRICTS.find((x) => x.id === id);
     const d = window.useDistrictView ? window.useDistrictView(base) : base;
     if (!d) {
@@ -394,8 +408,8 @@
             <DistrictGapsCard d={d} pal={pal} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-            <RevenueCard r={r} pal={pal} />
-            <BillRatesCard d={d} pal={pal} />
+            {canView && <RevenueCard r={r} pal={pal} />}
+            {canView && <BillRatesCard d={d} pal={pal} />}
             <LinkedTodosCard d={d} pal={pal} />
             <ContractCard d={d} pal={pal} />
             <window.DocumentsSection pal={pal} scope="district" scopeId={d.id} />
@@ -408,6 +422,9 @@
 
   function DistrictHeader({ d, r, pal }) {
     const save = (patch) => window.DistrictOverridesStore.upsert(d.id, patch);
+    // Finance visibility: the three money KPIs are admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
     return (
       <div style={{ padding: '14px 24px 4px', display: 'flex', alignItems: 'flex-start', gap: 18 }}>
         <span style={{
@@ -435,10 +452,14 @@
           }}>
             <Kpi pal={pal} label="Schools"  value={r.schools.length} />
             <Kpi pal={pal} label="Hours"    value={`${r.weeklyHours}h`} sub="per week" />
-            <Kpi pal={pal} label="Revenue"      value={`$${r.annualRevenue.toLocaleString()}`}   sub="/year" valueColor={pal.accent} />
-            <Kpi pal={pal} label="Gross Margin" value={`$${r.annualMargin.toLocaleString()}`}    sub="/year" />
-            <Kpi pal={pal} label="Net Margin"   value={`$${r.annualNetMargin.toLocaleString()}`} sub="/year"
-                 valueColor={r.annualNetMargin >= 0 ? pal.text : pal.warn} />
+            {canView && (
+              <>
+                <Kpi pal={pal} label="Revenue"      value={`$${r.annualRevenue.toLocaleString()}`}   sub="/year" valueColor={pal.accent} />
+                <Kpi pal={pal} label="Gross Margin" value={`$${r.annualMargin.toLocaleString()}`}    sub="/year" />
+                <Kpi pal={pal} label="Net Margin"   value={`$${r.annualNetMargin.toLocaleString()}`} sub="/year"
+                     valueColor={r.annualNetMargin >= 0 ? pal.text : pal.warn} />
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -795,7 +816,7 @@
   // Bill rates card — the district's rate card (specialty → $/hr). Every
   // assignment in this district derives its bill rate from the row matching
   // the contractor's specialty. Blank rows fall back to the per-spec
-  // default in /admin (`spec_settings.default_bill_low`) so prototype
+  // default on /financials (`spec_financials.default_bill_low`) so prototype
   // margin numbers don't collapse to $0.
   function BillRatesCard({ d, pal }) {
     const SPECS = (window.RCIS_DATA && window.RCIS_DATA.SPECIALTIES) || [];

@@ -444,6 +444,8 @@
       return n > 0 ? String(n) : null;
     }, [renewals]);
 
+    // Finance visibility: the Financials page is admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { canView: false };
     const NAV = [
       { key: 'home',        icon: 'grid',   name: 'Home',         to: '/' },
       { key: 'contractors', icon: 'user',   name: 'Contractors',  to: '/contractors', badge: String(liveContractors.length) },
@@ -455,7 +457,7 @@
       { key: 'renewals',    icon: 'file',   name: 'Renewals',     to: '/renewals',    badge: renewalsBadge },
       { key: 'financials',  icon: 'file',   name: 'Financials',   to: '/financials' },
       { key: 'admin',       icon: 'settings', name: 'Admin',      to: '/admin' },
-    ];
+    ].filter((n) => n.key !== 'financials' || finance.canView);
     return (
       <div style={{
         width: 224, flexShrink: 0,

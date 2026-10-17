@@ -277,6 +277,7 @@
     // has no explicit override).
     if (window.useSpecSettings) window.useSpecSettings();
     if (window.useDistrictRateCards) window.useDistrictRateCards();
+    if (window.useFinanceRates) window.useFinanceRates();
     const allGaps = window.useCoverageGaps ? window.useCoverageGaps() : [];
     const gaps = React.useMemo(() => allGaps.filter((g) => g.status === 'open'), [allGaps]);
     // Wrap contractors through the overrides view so renames/contact edits
@@ -597,9 +598,12 @@
   function GapsPanel({ pal, gaps, ranked, selectedGapId, selectedContractor, rateOverrides, onChangeRate, onSelectGap, onCreateTask, onEditGap, onLogGap }) {
     const items = ranked ? ranked : gaps.map((g) => ({ g, fit: null }));
     const isRanked = !!ranked;
+    // Finance visibility: revenue figures are admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
     const totalWeekly = (isRanked ? items.map((r) => r.g) : gaps)
       .reduce((sum, g) => sum + gapWeeklyRevenue(g, rateOverrides), 0);
-    const moneySuffix = items.length
+    const moneySuffix = items.length && canView
       ? ` · ${fmtMoney(totalWeekly)}/wk potential`
       : '';
     return (
@@ -686,6 +690,10 @@
   function OverviewStats({ pal, weeklyPotential, openGaps, availableHours, contractorCount }) {
     const SCHOOL_WEEKS = 36;
     const annual = weeklyPotential * SCHOOL_WEEKS;
+    // Finance visibility: the two money figures are admin-only; non-admins
+    // see the hours / gaps sentence alone.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
 
     const heroNumber = {
       fontSize: 40,
@@ -712,20 +720,22 @@
       }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr 1fr',
+          gridTemplateColumns: canView ? '1fr 1fr 1fr' : '1fr',
           alignItems: 'center',
           gap: 24,
         }}>
-          <div style={{ textAlign: 'left' }}>
-            <div style={heroNumber}>{fmtMoney(weeklyPotential)}</div>
-            <div style={heroLabel}>weekly potential</div>
-          </div>
+          {canView && (
+            <div style={{ textAlign: 'left' }}>
+              <div style={heroNumber}>{fmtMoney(weeklyPotential)}</div>
+              <div style={heroLabel}>weekly potential</div>
+            </div>
+          )}
           <div style={{
             fontSize: 13,
             color: pal.textSoft,
             textAlign: 'center',
             lineHeight: 1.5,
-            alignSelf: 'end',
+            alignSelf: canView ? 'end' : 'center',
           }}>
             <span style={{ color: pal.text, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
               {availableHours.toLocaleString()} hours
@@ -736,10 +746,12 @@
             </span>
             <span> to fill</span>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={heroNumber}>{fmtMoney(annual)}</div>
-            <div style={heroLabel}>annualized ({SCHOOL_WEEKS}-wk school year)</div>
-          </div>
+          {canView && (
+            <div style={{ textAlign: 'right' }}>
+              <div style={heroNumber}>{fmtMoney(annual)}</div>
+              <div style={heroLabel}>annualized ({SCHOOL_WEEKS}-wk school year)</div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -773,6 +785,9 @@
   }
 
   function GapRow({ pal, gap, fit, rate, onChangeRate, selected, rankAction, onClick, onEdit }) {
+    // Finance visibility: the weekly $ and the rate field are admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
     const wanted = gapModality(gap);
     const weekly = Math.round(gap.hours * rate);
     const isDistrictWide = gap.scope === 'district' || !gap.schoolId;
@@ -819,15 +834,19 @@
         </div>
         <div style={{
           textAlign: 'right',
-          minWidth: 116,
+          minWidth: canView ? 116 : 0,
           fontVariantNumeric: 'tabular-nums',
         }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: pal.accent, lineHeight: 1.2 }}>
-            {fmtMoney(weekly)}/wk
-          </div>
-          <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4 }}>
-            <RateField rate={rate} onChange={onChangeRate} pal={pal} />
-          </div>
+          {canView && (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 700, color: pal.accent, lineHeight: 1.2 }}>
+                {fmtMoney(weekly)}/wk
+              </div>
+              <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4 }}>
+                <RateField rate={rate} onChange={onChangeRate} pal={pal} />
+              </div>
+            </>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <SpecChip code={gap.spec} />
@@ -863,7 +882,10 @@
     const sColor = statusColors[contractor.status] || pal.textFaint;
     const covers = neededHours == null ? null : (free >= neededHours);
     const mods = contractorModalities(contractor);
-    const hourly = (contractor.rates && Number.isFinite(contractor.rates.hourly))
+    // Finance visibility: pay and margin are admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
+    const hourly = (canView && contractor.rates && Number.isFinite(contractor.rates.hourly))
       ? contractor.rates.hourly : null;
     const hasMargin = hourly != null && Number.isFinite(gapRate);
     const marginHr = hasMargin ? (gapRate - hourly) : null;
@@ -923,10 +945,10 @@
         </div>
         <div style={{
           textAlign: 'right',
-          minWidth: hasMargin ? 116 : 64,
+          minWidth: !canView ? 0 : (hasMargin ? 116 : 64),
           fontVariantNumeric: 'tabular-nums',
         }}>
-          {hasMargin ? (
+          {!canView ? null : hasMargin ? (
             <>
               <div style={{ fontSize: 13, fontWeight: 700, color: marginColor, lineHeight: 1.2 }}>
                 {marginHr >= 0 ? '+' : ''}{fmtMoney(marginHr)}/hr
@@ -1166,6 +1188,9 @@
   function ShortlistCard({ pal, proposal, gap, contractor, rateOverrides, onConfirm, onDismiss, onUpdateNote, onCreateTask }) {
     // Re-render when admin tweaks per-spec burden.
     if (window.useSpecSettings) window.useSpecSettings();
+    // Finance visibility: the per-hour and weekly money grids are admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
     const stale = !gap || !contractor || (gap && gap.status !== 'open');
     const billRate = gap ? effectiveRate(gap, rateOverrides) : null;
     const payRate  = contractor && contractor.rates && Number.isFinite(Number(contractor.rates.hourly))
@@ -1245,8 +1270,8 @@
               </div>
             </div>
 
-            {/* Per-hour: bill | pay | burden | gross | net */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 4 }}>
+            {/* Per-hour: bill | pay | burden | gross | net (admins only) */}
+            {canView && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 4 }}>
               <Stat pal={pal} label="Bill"   value={billRate != null ? fmtMoney(billRate) : '—'} />
               <Stat pal={pal} label="Pay"    value={payRate  != null ? fmtMoney(payRate)  : '—'} />
               <Stat pal={pal} label="Burden" value={burdenHr > 0 ? fmtMoney(burdenHr) : '—'}
@@ -1257,9 +1282,9 @@
               <Stat pal={pal} label="Net/hr"
                 value={netHr != null ? fmtMoney(netHr) : '—'}
                 tone={netHr != null && netHr < 0 ? '#E76B5D' : pal.text} />
-            </div>
-            {/* Weekly: rev | gross | net */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+            </div>}
+            {/* Weekly: rev | gross | net (admins only) */}
+            {canView && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
               <Stat pal={pal} label="Weekly rev"
                 value={weeklyRev != null ? fmtMoney(weeklyRev) : '—'} tone={pal.accent} />
               <Stat pal={pal} label="Weekly gross"
@@ -1268,7 +1293,7 @@
               <Stat pal={pal} label="Weekly net"
                 value={weeklyNet != null ? fmtMoney(weeklyNet) : '—'}
                 tone={weeklyNet != null && weeklyNet < 0 ? '#E76B5D' : pal.text} />
-            </div>
+            </div>}
 
             {/* Note */}
             <input

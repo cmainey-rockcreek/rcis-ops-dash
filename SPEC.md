@@ -105,13 +105,18 @@ financial widget for everyone else. Fully scoped in
   figure. Decided Oct 17: after Phase B only admins can edit the
   indirect-hours ratio (it lives on `/financials`); everyone still sees
   the auto-fill it drives.
-- **Phase B — client.** New `finance-rates-store.js` (four maps, realtime,
-  `remove` for a cleared or 0 rate), stores stop reading **and sending**
-  the legacy keys, `useFinanceAccess()` gate, every financial widget hidden
-  for non-admins, `/financials` route and sidebar entry gated, pre-change
-  cache keys removed on boot. Localhost testing writes to the finance
-  tables, so deploy day order is: everyone stops editing rates → paste the
-  reset → paste the migrate → deploy → everyone reloads → paste
+- **Phase B — client. Built Oct 17, 2026; owner checklist passed the same
+  day.** `finance-rates-store.js` (four maps, realtime, a
+  cleared or 0 rate deletes the row), the five shared-table stores no
+  longer read or send the legacy keys and forward pay / bill / burden
+  patches to it, `useFinanceAccess()` gates every financial widget, the
+  margin column and its CSV column, the rate fields in the editors, the
+  Financials page and its sidebar entry; pre-change cache keys are removed
+  on boot. Verified at localhost in both modes with mock data and a clean
+  console. Owner runs the done-checklist in the brief (needs an admin and
+  a non-admin sign-in at `http://127.0.0.1:4175`, email + password).
+  Then deploy day, in order: everyone stops editing rates → paste the
+  reset → paste the migrate → merge and deploy → everyone reloads → paste
   `phase-b-live.sql` (checks the mirror is exact, locks, blanks the legacy
   copies, installs blanking triggers).
 - **Phase C — drop the legacy columns** a few days after Phase B is live:
@@ -164,6 +169,12 @@ real therapist / school data replaces the mocks.
   shows "—" per row and "N without a bill rate" in the header; the CSV
   button is a browser download, which some browsers prompt for on first
   use.
+- **Finance visibility follow-ups (Phase B review, Oct 17, 2026).** (a)
+  Clearing a mock contractor's pay deletes its `contractor_pay_rates` row
+  and the prototype rate from `data-contractors.js` reappears; goes away
+  with the real data migration. (b) The three-line admin gate is pasted
+  into about fifteen components; fold it into one boolean hook when next
+  touching those files.
 - **PT specialty color is nearly invisible in dark mode.** `SpecChip` and
   the initials avatar on `/assignments` use `specColor('PT')`, a navy close
   to the dark card background. Pick a dark-safe color in

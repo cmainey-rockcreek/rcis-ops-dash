@@ -8,7 +8,9 @@
 // via useContractors().
 
 window.ContractorsStore = (() => {
-  const CACHE_KEY = 'rcis.contractors.cache.v1';
+  // v2: rows no longer carry pay_rate (finance visibility, Oct 2026).
+  const CACHE_KEY = 'rcis.contractors.cache.v2';
+  try { localStorage.removeItem('rcis.contractors.cache.v1'); } catch (e) {}
   const TABLE = 'contractors';
 
   // Snapshot the mock catalog at first load — we never mutate this; the
@@ -37,9 +39,9 @@ window.ContractorsStore = (() => {
       city: r.city || '',
       npi: r.npi || '',
       hireDate: r.hire_date || null,
-      rates: {
-        hourly: r.pay_rate != null ? Number(r.pay_rate) : 0,
-      },
+      // Pay lives in the admin-only contractor_pay_rates table; the
+      // override layer fills rates.hourly from the finance store.
+      rates: { hourly: null },
       licenses: [],
       schedule: [],
       assignments: [],
@@ -67,7 +69,6 @@ window.ContractorsStore = (() => {
       city: c.city || null,
       npi: c.npi || null,
       hire_date: c.hireDate || null,
-      pay_rate: c.rates && c.rates.hourly != null ? c.rates.hourly : null,
       created_by: c.createdBy || null,
     };
   }
@@ -169,7 +170,7 @@ window.ContractorsStore = (() => {
         city: '',
         npi: '',
         hireDate: null,
-        rates: { hourly: 0 },
+        rates: { hourly: null },
         licenses: [], schedule: [], assignments: [], documents: [],
         notes: '',
         createdBy: current ? current.id : null,
@@ -178,6 +179,10 @@ window.ContractorsStore = (() => {
         __enriched: true,
         ...partial,
       };
+      // Pay is admin-only (contractor_pay_rates); never on this row.
+      const payRate = c.payRate != null ? c.payRate : (c.rates ? c.rates.hourly : null);
+      delete c.payRate;
+      c.rates = { ...(c.rates || {}), hourly: null };
       setState([c, ...state]);
       const row = toRow(c);
       const { error } = await window.sb.from(TABLE).insert(row);
@@ -186,6 +191,9 @@ window.ContractorsStore = (() => {
         setState(state.filter((x) => x.id !== c.id));
         return null;
       }
+      if (payRate != null && window.FinanceRatesStore) {
+        await window.FinanceRatesStore.setContractorPay(c.id, payRate);
+      }
       return c;
     },
 
@@ -193,8 +201,14 @@ window.ContractorsStore = (() => {
       const existing = state.find((c) => c.id === id);
       if (!existing) return;
       const next = { ...existing, ...patch, updatedAt: Date.now() };
-      // Patch may carry a top-level pay rate; normalize into rates.{}.
-      if (patch.payRate != null)  next.rates = { ...(next.rates || {}), hourly: patch.payRate };
+      // Pay is admin-only and lives in contractor_pay_rates.
+      if (Object.prototype.hasOwnProperty.call(patch, 'payRate')) {
+        if (window.FinanceRatesStore) window.FinanceRatesStore.setContractorPay(id, patch.payRate);
+      } else if (patch.rates && Object.prototype.hasOwnProperty.call(patch.rates, 'hourly')) {
+        if (window.FinanceRatesStore) window.FinanceRatesStore.setContractorPay(id, patch.rates.hourly);
+      }
+      delete next.payRate;
+      next.rates = { ...(next.rates || {}), hourly: null };
       setState(state.map((c) => c.id === id ? next : c));
       const row = toRow(next);
       delete row.id;

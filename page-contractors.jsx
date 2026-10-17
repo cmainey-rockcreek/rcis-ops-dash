@@ -251,6 +251,9 @@
       payRate: '',
     });
     const [saving, setSaving] = React.useState(false);
+    // Finance visibility: pay is admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
 
     React.useEffect(() => {
       const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -278,9 +281,8 @@
           city: draft.city.trim() || '',
           email: draft.email.trim() || '',
           phone: draft.phone.trim() || '',
-          rates: {
-            hourly: draft.payRate !== '' ? Number(draft.payRate) : 0,
-          },
+          // A blank or 0 pay means "no rate"; the store writes nothing for it.
+          payRate: draft.payRate !== '' && Number(draft.payRate) > 0 ? Number(draft.payRate) : null,
         });
       } finally { setSaving(false); }
     };
@@ -351,7 +353,7 @@
               </div>
             </div>
 
-            <div>
+            {canView && <div>
               <div style={labelStyle}>Pay rate ($/hr)</div>
               <input type="number" min="0" step="1" value={draft.payRate} style={inputStyle}
                 placeholder="e.g. 70"
@@ -359,7 +361,7 @@
               <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 4 }}>
                 Bill rate is set per district on the district profile.
               </div>
-            </div>
+            </div>}
 
             <div>
               <div style={labelStyle}>Licensed states</div>
@@ -636,6 +638,9 @@
       ? window.useContractorAssignments(c)
       : (c.assignments || []);
     const F = window.ContractorFinancials || {};
+    // Finance visibility: pay, revenue and margin are admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
     // Bill rate now flows from the district rate card per row; `pay` is
     // still a contractor-level default since the contractor's pay rate
     // does not vary by district. `spec` lets effectiveBill fall back to
@@ -698,16 +703,22 @@
             display: 'flex', gap: 18, padding: '10px 14px',
             background: pal.card, border: `1px solid ${pal.border}`, borderRadius: 9,
           }}>
-            <EditableRateKpi pal={pal} label="Pay Rate"
-              value={c.rates.hourly}
-              onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { payRate: v })} />
+            {canView && (
+              <EditableRateKpi pal={pal} label="Pay Rate"
+                value={c.rates.hourly}
+                onSave={(v) => window.ContractorOverridesStore.upsert(c.id, { payRate: v })} />
+            )}
             <Kpi pal={pal} label="Load"     value={`${booked}h`}     sub={`of ${c.cap}h`} />
-            <Kpi pal={pal} label="Revenue"     value={fmt(annualRev)} sub="/year"
-                 valueColor={pal.accent} />
-            <Kpi pal={pal} label="Gross Margin" value={fmt(marginHr, { cents: true })} sub="/hour"
-                 valueColor={marginHr >= 0 ? pal.text : pal.warn} />
-            <Kpi pal={pal} label="Net Margin"   value={fmt(netMarginHr, { cents: true })} sub="/hour"
-                 valueColor={netMarginHr >= 0 ? pal.text : pal.warn} />
+            {canView && (
+              <>
+                <Kpi pal={pal} label="Revenue"     value={fmt(annualRev)} sub="/year"
+                     valueColor={pal.accent} />
+                <Kpi pal={pal} label="Gross Margin" value={fmt(marginHr, { cents: true })} sub="/hour"
+                     valueColor={marginHr >= 0 ? pal.text : pal.warn} />
+                <Kpi pal={pal} label="Net Margin"   value={fmt(netMarginHr, { cents: true })} sub="/hour"
+                     valueColor={netMarginHr >= 0 ? pal.text : pal.warn} />
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -726,8 +737,14 @@
 
     const startEdit = () => { setDraft(String(value || '')); setEditing(true); };
     const commit = () => {
-      const num = Number(draft);
-      if (Number.isFinite(num) && num !== Number(value)) onSave(num);
+      // Blank or 0 clears the rate (the finance store deletes the row).
+      const trimmed = String(draft).trim();
+      const num = trimmed === '' ? null : Number(draft);
+      if (num == null || (Number.isFinite(num) && num <= 0)) {
+        if (value != null && value !== 0) onSave(null);
+      } else if (Number.isFinite(num) && num !== Number(value)) {
+        onSave(num);
+      }
       setEditing(false);
     };
     const cancel = () => setEditing(false);
@@ -1525,6 +1542,9 @@
     );
   }
   function AssignmentTable({ rows, pal, active, onRowClick }) {
+    // Finance visibility: the Bill column is admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
     if (!rows.length) {
       return (
         <div style={{ fontSize: 12, color: pal.textFaint, fontStyle: 'italic', padding: '6px 0' }}>None.</div>
@@ -1533,7 +1553,7 @@
     return (
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '1.5fr 1.2fr 70px 70px 70px 90px',
+        gridTemplateColumns: canView ? '1.5fr 1.2fr 70px 70px 70px 90px' : '1.5fr 1.2fr 70px 70px 90px',
         gap: 10, alignItems: 'center',
         fontSize: 12,
       }}>
@@ -1541,7 +1561,7 @@
         <Th pal={pal}>District</Th>
         <Th pal={pal} right>Direct</Th>
         <Th pal={pal} right>Indirect</Th>
-        <Th pal={pal} right>Bill</Th>
+        {canView && <Th pal={pal} right>Bill</Th>}
         <Th pal={pal} right>{active ? 'Since' : 'Dates'}</Th>
         {rows.map((a, i) => {
           const editable = a.source === 'supabase' && a._id;
@@ -1580,17 +1600,19 @@
               <div onClick={onClick} style={{ ...baseRow, color: pal.textSoft, fontWeight: 400 }}>{a.district || '—'}</div>
               <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{a.direct}h</div>
               <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', color: pal.textSoft, fontVariantNumeric: 'tabular-nums' }}>{a.indirect}h</div>
-              <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', color: pal.textSoft, fontVariantNumeric: 'tabular-nums' }}>
-                {(() => {
-                  // Bill rate is derived from the district rate card (or
-                  // per-spec default) — same resolution effectiveBill uses
-                  // for revenue math, so what the user sees matches what
-                  // the rollups computed.
-                  const F = window.ContractorFinancials;
-                  const r = F && F.effectiveBill ? F.effectiveBill(a, 0, a.spec) : 0;
-                  return r > 0 ? `$${Math.round(r)}` : '—';
-                })()}
-              </div>
+              {canView && (
+                <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', color: pal.textSoft, fontVariantNumeric: 'tabular-nums' }}>
+                  {(() => {
+                    // Bill rate is derived from the district rate card (or
+                    // per-spec default) — same resolution effectiveBill uses
+                    // for revenue math, so what the user sees matches what
+                    // the rollups computed.
+                    const F = window.ContractorFinancials;
+                    const r = F && F.effectiveBill ? F.effectiveBill(a, 0, a.spec) : 0;
+                    return r > 0 ? `$${Math.round(r)}` : '—';
+                  })()}
+                </div>
+              )}
               <div onClick={onClick} style={{ ...baseRow, textAlign: 'right', fontSize: 11, color: pal.textFaint }}>
                 {active ? formatDate(a.startDate) : `${formatDateShort(a.startDate)} → ${formatDateShort(a.endDate)}`}
               </div>
@@ -1606,6 +1628,9 @@
     // Subscribe so the "auto · N% of direct" label and autoIndirect math
     // pick up admin edits to the per-spec ratio while this modal is open.
     if (window.useSpecSettings) window.useSpecSettings();
+    // Finance visibility: the pay-rate override is admin-only.
+    const finance = window.useFinanceAccess ? window.useFinanceAccess() : { ready: true, canView: false };
+    const canView = finance.canView;
     const [draft, setDraft] = React.useState({
       id: null,
       contractorId: null, contractorName: '',
@@ -1709,12 +1734,15 @@
       const indirect = draft.indirectOverride
         ? (Number(draft.indirectHours) || 0)
         : window.AssignmentsStore.autoIndirect(direct, draft.spec);
-      onSave({
+      const out = {
         ...draft,
         directHours:   direct,
         indirectHours: indirect,
         payRate:  draft.payRate != null && draft.payRate !== '' ? Number(draft.payRate) : null,
-      });
+      };
+      // Non-admins never saw the pay field; leave the stored rate alone.
+      if (!canView) delete out.payRate;
+      onSave(out);
     };
 
     return (
@@ -1862,8 +1890,8 @@
               </div>
             </div>
 
-            {/* Pay rate (bill rate is now derived from the district rate card). */}
-            <div>
+            {/* Pay rate (admins only; bill rate is derived from the district rate card). */}
+            {canView && <div>
               <div style={s.label}>Pay rate ($ / hr)</div>
               <input type="number" min="0" step="1" style={s.input}
                 value={draft.payRate == null ? '' : draft.payRate}
@@ -1872,7 +1900,7 @@
               <div style={{ fontSize: 10.5, color: pal.textFaint, marginTop: 4 }}>
                 Bill rate comes from the {draft.districtName || 'district'} rate card.
               </div>
-            </div>
+            </div>}
 
             {/* Dates */}
             <div style={s.row}>

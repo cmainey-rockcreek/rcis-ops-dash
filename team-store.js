@@ -328,6 +328,8 @@
   }
 
   window.TeamStore = {
+    // Fires on every profile/team change (same listeners the hooks use).
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     all: allMembers,
     assignable: assignableMembers,
     profiles: liveProfiles,
@@ -344,6 +346,16 @@
   window.useAllTeam = () => useMembers('all');
   window.useAdminProfiles = () => useMembers('admin');
   window.useCurrentProfile = useCurrentProfile;
+
+  // Whether the signed-in user may see pay, bill, burden, revenue and
+  // margin. Admins only (finance visibility, Oct 2026). RLS enforces it on
+  // the finance tables; this is the UI gate so non-admins see no financial
+  // widget rather than an empty one. `canView` is false until the profile
+  // has loaded, so nothing financial flashes on a cold start.
+  window.useFinanceAccess = function useFinanceAccess() {
+    const me = useCurrentProfile();
+    return { ready: me.ready, canView: !!(me.ready && me.isAdmin) };
+  };
 
   if (window.sb) {
     window.sb.auth.getSession().then(({ data }) => {

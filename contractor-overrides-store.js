@@ -7,14 +7,15 @@
 // mock values from data-contractors.js win.
 
 window.ContractorOverridesStore = (() => {
-  const CACHE_KEY = 'rcis.contractor_overrides.cache.v1';
+  // v2: rows no longer carry pay_rate (finance visibility, Oct 2026).
+  const CACHE_KEY = 'rcis.contractor_overrides.cache.v2';
+  try { localStorage.removeItem('rcis.contractor_overrides.cache.v1'); } catch (e) {}
   const TABLE = 'contractor_overrides';
 
   function fromRow(r) {
     return {
       contractorId: r.contractor_id,
       name: r.name || null,
-      payRate: r.pay_rate != null ? Number(r.pay_rate) : null,
       schedule: Array.isArray(r.schedule) ? r.schedule : null,
       email: r.email || null,
       phone: r.phone || null,
@@ -26,7 +27,6 @@ window.ContractorOverridesStore = (() => {
     return {
       contractor_id: o.contractorId,
       name: o.name || null,
-      pay_rate: o.payRate != null ? o.payRate : null,
       schedule: o.schedule || null,
       email: o.email || null,
       phone: o.phone || null,
@@ -100,8 +100,17 @@ window.ContractorOverridesStore = (() => {
     // Upsert by contractor_id. Patch is partial; existing fields preserved.
     async upsert(contractorId, patch) {
       if (!contractorId) return;
+      // Pay is admin-only and lives in contractor_pay_rates. Route it there
+      // and keep it off this row (which every active member can read).
+      if (patch && Object.prototype.hasOwnProperty.call(patch, 'payRate')) {
+        const { payRate, ...rest } = patch;
+        patch = rest;
+        if (window.FinanceRatesStore) window.FinanceRatesStore.setContractorPay(contractorId, payRate);
+        if (Object.keys(patch).length === 0) return;
+      }
       const existing = state[contractorId] || { contractorId };
       const next = { ...existing, ...patch, contractorId };
+      delete next.payRate;
       setState({ ...state, [contractorId]: next });
       const row = toRow(next);
       const { error } = await window.sb.from(TABLE)
@@ -124,12 +133,14 @@ window.useContractorOverrides = function useContractorOverrides() {
 // also flow through this so the contractor header can edit them inline.
 window.useContractorView = function useContractorView(c) {
   const all = window.useContractorOverrides();
+  // Pay comes from the admin-only finance store (null for non-admins).
+  const finance = window.useFinanceRates ? window.useFinanceRates() : null;
   return React.useMemo(() => {
     if (!c) return c;
     const o = all[c.id] || {};
     const rates = {
       ...(c.rates || {}),
-      hourly: o.payRate != null ? o.payRate : (c.rates && c.rates.hourly),
+      hourly: window.contractorPayFor ? window.contractorPayFor(c) : null,
     };
     const schedule = o.schedule || c.schedule;
     return {
@@ -141,7 +152,7 @@ window.useContractorView = function useContractorView(c) {
       phone: o.phone != null ? o.phone : c.phone,
       city:  o.city  != null ? o.city  : c.city,
     };
-  }, [c, all]);
+  }, [c, all, finance]);
 };
 
 // Synchronous helpers — usable outside React (e.g. inside useMemo bodies
@@ -150,11 +161,10 @@ window.useContractorView = function useContractorView(c) {
 window.applyContractorOverride = function applyContractorOverride(c, overridesMap) {
   if (!c) return c;
   const all = overridesMap || (window.ContractorOverridesStore && window.ContractorOverridesStore.get()) || {};
-  const o = all[c.id];
-  if (!o) return c;
+  const o = all[c.id] || {};
   const rates = {
     ...(c.rates || {}),
-    hourly: o.payRate != null ? o.payRate : (c.rates && c.rates.hourly),
+    hourly: window.contractorPayFor ? window.contractorPayFor(c) : null,
   };
   return {
     ...c,
@@ -186,14 +196,14 @@ window.contractorDisplayName = function contractorDisplayName(id) {
 // Used by the contractor list page so renames show up in the table.
 window.useContractorsView = function useContractorsView(contractors) {
   const all = window.useContractorOverrides();
+  const finance = window.useFinanceRates ? window.useFinanceRates() : null;
   return React.useMemo(() => {
     if (!Array.isArray(contractors)) return contractors;
     return contractors.map((c) => {
-      const o = all[c.id];
-      if (!o) return c;
+      const o = all[c.id] || {};
       const rates = {
         ...(c.rates || {}),
-        hourly: o.payRate != null ? o.payRate : (c.rates && c.rates.hourly),
+        hourly: window.contractorPayFor ? window.contractorPayFor(c) : null,
       };
       return {
         ...c,
@@ -204,5 +214,5 @@ window.useContractorsView = function useContractorsView(contractors) {
         city:  o.city  != null ? o.city  : c.city,
       };
     });
-  }, [contractors, all]);
+  }, [contractors, all, finance]);
 };
