@@ -76,7 +76,7 @@ contractor. Depends on a monthly time-entries CSV import from the time
 tracker; build after that import exists. Fully scoped in
 `docs/financials-page-scope.md`.
 
-### Finance visibility — Phase A drafted Oct 16, 2026
+### Finance visibility — live Oct 17, 2026; Phase C pending
 
 Before more internal staff are invited, pay, bill, revenue and margin must
 be visible only to admins. Decided Oct 16: no new flag; Kathleen and Mark
@@ -105,8 +105,10 @@ financial widget for everyone else. Fully scoped in
   figure. Decided Oct 17: after Phase B only admins can edit the
   indirect-hours ratio (it lives on `/financials`); everyone still sees
   the auto-fill it drives.
-- **Phase B — client. Built Oct 17, 2026; owner checklist passed the same
-  day.** `finance-rates-store.js` (four maps, realtime, a
+- **Phase B — client. Live since Oct 17, 2026** (PR #4 merged, Vercel
+  READY, reset + final migrate 4/4/1/7, `phase-b-live.sql` pasted:
+  marker `LOCKED`, every legacy copy blank, blanking triggers installed).
+  Remaining for Phase B: nothing. Watch for a few days, then Phase C. `finance-rates-store.js` (four maps, realtime, a
   cleared or 0 rate deletes the row), the five shared-table stores no
   longer read or send the legacy keys and forward pay / bill / burden
   patches to it, `useFinanceAccess()` gates every financial widget, the

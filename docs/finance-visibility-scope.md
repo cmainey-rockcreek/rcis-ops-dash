@@ -5,8 +5,9 @@ restricting pay, bill, revenue and margin data to admins before the dashboard
 is opened to more internal staff (SPEC.md "Finance visibility"). Owner
 decisions confirmed Oct 16; Phase A (schema and the one-shot SQL files)
 drafted and reviewed the same day and applied to the live project Oct 17
-(see SPEC.md for the receipt). Phase B (client) built Oct 17 on the branch;
-owner checklist pending, then deploy day. This is the build brief._
+(see SPEC.md for the receipt). Phase B (client) built, checklisted and
+deployed Oct 17; `phase-b-live.sql` pasted the same day. Phase C is the
+only step left. This is the build brief._
 
 ---
 
